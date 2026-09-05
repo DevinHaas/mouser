@@ -11,6 +11,8 @@ import { AuthWidget } from "./auth-widget";
 import { DriftingAstronaut } from "./astronaut-boosters";
 import { TerminalScreen } from "./terminal-screen";
 import { RefuelPanel } from "./refuel-panel";
+import { IntroSequence } from "./intro-sequence";
+import { hasSeenIntro, markIntroSeen, trackIntroReplay } from "@/lib/analytics";
 
 const TARGET = 10;
 const MODEL = "/capsule.glb";
@@ -710,11 +712,7 @@ function StartScreen({ onStart }: { onStart: () => void }) {
         no account needed — sign in only to save your time
       </p>
 
-      {session ? (
-        <div className="start-account">
-          astronaut {session.user.name} is ready
-        </div>
-      ) : showAuth ? (
+      {session ? null : showAuth ? (
         <AuthWidget />
       ) : (
         <button
@@ -752,6 +750,11 @@ export function MouserGame() {
     () => new URLSearchParams(location.search).has("play"),
   );
   const [paused, setPaused] = useState(false);
+  // Story panels between START and level 1 — shown until the player has seen
+  // them once, and re-openable only via the ⌘K command bar (/?intro=1).
+  const [intro, setIntro] = useState(
+    () => new URLSearchParams(location.search).has("intro"),
+  );
   // Terminal: `camLocked` is camera ownership (held across both zooms),
   // `terminalDone` is the level gate.
   const [camLocked, setCamLocked] = useState(false);
@@ -861,7 +864,23 @@ export function MouserGame() {
     return playMusic("/music/game.mp3");
   }, [started, done]);
 
+  // Replaying the intro from the command bar (/?intro=1) is a distinct signal.
+  useEffect(() => {
+    if (new URLSearchParams(location.search).has("intro")) trackIntroReplay();
+  }, []);
+
   const beginGame = () => {
+    if (!hasSeenIntro() && !new URLSearchParams(location.search).has("play")) {
+      setIntro(true);
+      return;
+    }
+    start.current = performance.now();
+    setStarted(true);
+  };
+
+  const finishIntro = () => {
+    markIntroSeen();
+    setIntro(false);
     start.current = performance.now();
     setStarted(true);
   };
@@ -877,6 +896,21 @@ export function MouserGame() {
       document.body.style.overflow = "";
     };
   }, [started, paused, done, camLocked, refuelAt]);
+
+  // While the story panels are up, hide the page chrome that lives outside this
+  // component (account menu, ⌘K nav hint) so the overlay reads clean.
+  useEffect(() => {
+    document.body.classList.toggle("intro-active", intro);
+    return () => document.body.classList.remove("intro-active");
+  }, [intro]);
+
+  // The in-scene timer HUD lives top-right where the account menu sits — hide
+  // the menu once the run is underway so it doesn't cover the clock.
+  useEffect(() => {
+    const playing = started && !done;
+    document.body.classList.toggle("game-active", playing);
+    return () => document.body.classList.remove("game-active");
+  }, [started, done]);
 
   useEffect(() => {
     if (!started || done || paused) return;
@@ -1131,7 +1165,11 @@ export function MouserGame() {
           </div>
         )}
 
-        {!started && <StartScreen onStart={beginGame} />}
+        {!started && !intro && (
+          <StartScreen onStart={beginGame} />
+        )}
+
+        {intro && <IntroSequence onDone={finishIntro} />}
 
         {done && (
           <div className="endcard">
@@ -1141,7 +1179,7 @@ export function MouserGame() {
         )}
       </div>
       <MusicViz />
-      {!started && <LeaderboardDock />}
+      {!started && !intro && <LeaderboardDock />}
     </>
   );
 }

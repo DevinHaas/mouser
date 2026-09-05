@@ -3,9 +3,11 @@ import {
   attachMusic,
   getEffectsVolume,
   getMusicVolume,
+  getNarratorVolume,
   musicBus,
   setEffectsVolume,
   setMusicVolume,
+  setNarratorVolume,
 } from "@/lib/sfx";
 
 const BARS = 22;
@@ -23,11 +25,17 @@ export function MusicViz() {
   const sfxMuted = sfxVol === 0;
   const lastSfx = useRef(0.6);
 
+  const [voVol, setVoVol] = useState(0.8);
+  const voMuted = voVol === 0;
+  const lastVo = useRef(0.8);
+
   useEffect(() => {
     setVol(getMusicVolume());
     last.current = getMusicVolume();
     setSfxVol(getEffectsVolume());
     lastSfx.current = getEffectsVolume();
+    setVoVol(getNarratorVolume());
+    lastVo.current = getNarratorVolume();
     document.querySelectorAll("audio").forEach(attachMusic);
 
     const { ac, analyser } = musicBus();
@@ -97,6 +105,12 @@ export function MusicViz() {
     if (v > 0) lastSfx.current = v;
   };
 
+  const applyVo = (v: number) => {
+    setVoVol(v);
+    setNarratorVolume(v);
+    if (v > 0) lastVo.current = v;
+  };
+
   return (
     <div className="music-dock">
       <canvas ref={canvas} className="music-bars" aria-hidden="true" />
@@ -142,6 +156,28 @@ export function MusicViz() {
           aria-label="sound effects volume"
           onChange={(e) => applySfx(Number(e.target.value))}
           style={{ "--fill": `${sfxVol * 100}%` } as React.CSSProperties}
+        />
+      </div>
+      <div className="music-row">
+        <button
+          type="button"
+          className="music-mute"
+          aria-label={voMuted ? "unmute narrator voice" : "mute narrator voice"}
+          title="narrator voice volume"
+          onClick={() => applyVo(voMuted ? lastVo.current || 0.8 : 0)}
+        >
+          {voMuted ? "✕" : "VO"}
+        </button>
+        <input
+          className="music-slider"
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={voVol}
+          aria-label="narrator voice volume"
+          onChange={(e) => applyVo(Number(e.target.value))}
+          style={{ "--fill": `${voVol * 100}%` } as React.CSSProperties}
         />
       </div>
     </div>

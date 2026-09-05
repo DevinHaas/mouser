@@ -3,6 +3,7 @@ export const commandPages = [
   { name: "Leaderboard", path: "/leaderboard", hint: "Top mouseless runs" },
   { name: "User stats", path: "/stats", hint: "Your performance" },
   { name: "Friends", path: "/friends", hint: "Your friends" },
+  { name: "Watch intro", path: "/?intro=1", hint: "Replay the opening story" },
 ];
 
 export function findCommandPages(query: string, userId?: string) {

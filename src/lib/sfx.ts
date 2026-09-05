@@ -135,6 +135,24 @@ export function setEffectsVolume(v: number) {
   localStorage.setItem(SFX_VOL_KEY, String(v));
 }
 
+/** Narrator voice in the intro sequence — fully independent slider: neither the
+ *  master nor the effects volume affects it. Louder default: TTS clips are quiet. */
+const VO_VOL_KEY = "mouser:voVolume";
+
+export function getNarratorVolume() {
+  const raw = localStorage.getItem(VO_VOL_KEY);
+  if (raw === null) return 0.8;
+  const v = Number(raw);
+  return Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0.8;
+}
+
+export function setNarratorVolume(v: number) {
+  localStorage.setItem(VO_VOL_KEY, String(v));
+  // Let a playing narrator line pick up the change without waiting for the
+  // next panel.
+  window.dispatchEvent(new CustomEvent("mouser:vovol", { detail: v }));
+}
+
 export function musicBus() {
   if (!bus) {
     const ac = (ctx ??= new AudioContext());
