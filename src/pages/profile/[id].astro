@@ -34,6 +34,7 @@ const best = bestRow[0]?.t ?? null
     </h1>
     {tool && (
       <a class="tool-badge" href={tool.website} target="_blank" rel="noreferrer" style={`--tool-color:${tool.color}`}>
+        <img class="tool-badge-logo" src={tool.logo} alt="" width="16" height="16" loading="lazy" />
         {tool.name}
       </a>
     )}
@@ -76,6 +77,15 @@ const best = bestRow[0]?.t ?? null
     border: 1px solid var(--tool-color);
     text-decoration: none;
     margin-top: -12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tool-badge-logo {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    object-fit: contain;
   }
   h1 > span {
     font-size: clamp(24px, 6vw, 56px);

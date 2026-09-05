@@ -1,30 +1,17 @@
 ---
 import Layout from '../layouts/Layout.astro'
-import { db } from '@/lib/db'
-import { runs, user } from '@/lib/db/schema'
-import { eq, asc, count } from 'drizzle-orm'
 import { Podium } from '@/components/podium'
 import { MusicViz } from '@/components/music-viz'
 import { padTop3 } from '@/lib/mock-leaderboard'
+import { bestRunPerUser, boardSize } from '@/lib/leaderboard-query'
 import { paging, PAGE_SIZE, PODIUM } from '@/lib/paging'
 import { fmtTime } from '@/lib/format'
 import { MOUSELESS_TOOL_BY_ID } from '@/lib/mouseless-tools'
 
-// fresh builder per call — drizzle's builders mutate, so they can't be shared
-const board = () =>
-  db
-    .select({ name: user.name, timeMs: runs.timeMs, image: user.image, mouselessTool: user.mouselessTool })
-    .from(runs)
-    .innerJoin(user, eq(runs.userId, user.id))
-    .where(eq(runs.cheats, 0))
-    .orderBy(asc(runs.timeMs))
+const board = bestRunPerUser
 
 // ponytail: the board is cosmetic — a DB hiccup shows mock rows, not a 500.
-const totals = await db
-  .select({ n: count() })
-  .from(runs)
-  .where(eq(runs.cheats, 0))
-  .catch(() => [{ n: 0 }])
+const totals = await boardSize().catch(() => [{ n: 0 }])
 
 const { page, pages, offset, firstRank } = paging(
   totals[0]?.n ?? 0,
@@ -63,6 +50,7 @@ const podium = padTop3(top3)
               {r.name}
               {tool && (
                 <a class="tool-badge" href={tool.website} target="_blank" rel="noreferrer" style={`--tool-color:${tool.color}`} title={tool.name}>
+                  <img class="tool-badge-logo" src={tool.logo} alt="" width="14" height="14" loading="lazy" />
                   {tool.name}
                 </a>
               )}
@@ -154,6 +142,15 @@ const podium = padTop3(top3)
     border: 1px solid var(--tool-color);
     text-decoration: none;
     flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .tool-badge-logo {
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    object-fit: contain;
   }
   .time {
     color: #b9a6ff;

@@ -64,6 +64,7 @@ export function ToolPicker({ initial }: { initial: string | null }) {
           {MOUSELESS_TOOLS.map((t) => (
             <li key={t.id} role="option" aria-selected={value === t.id}>
               <button type="button" onClick={() => choose(t.id)}>
+                <img className="tool-picker-logo" src={t.logo} alt="" width="16" height="16" loading="lazy" />
                 {t.name}
               </button>
             </li>
