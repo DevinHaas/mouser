@@ -1206,6 +1206,9 @@ body.game-active .profile-menu {
   position: fixed;
   inset: 0;
   z-index: 9;
+  /* rendered inside .hud (pointer-events: none) — opt the whole modal back in
+     so the ko-fi link and dashboard button are clickable */
+  pointer-events: auto;
   display: grid;
   grid-template-rows: 1fr auto;
   gap: clamp(16px, 3vh, 32px);
@@ -1227,13 +1230,17 @@ body.game-active .profile-menu {
   min-height: 0;
 }
 
-.intro-panel img {
+/* The turning page swings outside the art, so the box is wider than the panel
+   and the frame is drawn in the shader instead of as a border here. */
+.intro-panel .page-turn {
   min-height: 0;
-  max-height: 100%;
-  max-width: min(100%, 1000px);
-  object-fit: contain;
-  border: 1px solid rgba(255, 122, 40, 0.25);
-  box-shadow: 0 0 60px rgba(255, 122, 40, 0.14);
+  width: min(100%, 1100px);
+  height: 100%;
+  filter: drop-shadow(0 0 60px rgba(255, 122, 40, 0.18));
+}
+
+.intro-panel .page-turn canvas {
+  display: block;
 }
 
 .intro-panel figcaption {

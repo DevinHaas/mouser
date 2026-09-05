@@ -99,6 +99,45 @@ export async function playRadio(src: string, volume = 1) {
   source.addEventListener("ended", () => ringLfo.stop());
 }
 
+/**
+ * Paper rustle for the intro page turn, synthesized rather than sampled: it is
+ * a noise burst whose bandpass sweeps up and back down, which is what makes
+ * noise read as a sheet passing a fold instead of as static.
+ */
+export function playPageTurn(volume = 1) {
+  const ac = (ctx ??= new AudioContext());
+  ac.resume().catch(() => {});
+
+  const t0 = ac.currentTime;
+  const dur = 0.62;
+
+  const buffer = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate);
+  const noise = buffer.getChannelData(0);
+  for (let i = 0; i < noise.length; i++) noise[i] = Math.random() * 2 - 1;
+
+  const band = new BiquadFilterNode(ac, { type: "bandpass", Q: 0.9 });
+  band.frequency.setValueAtTime(700, t0);
+  band.frequency.exponentialRampToValueAtTime(4200, t0 + dur * 0.42);
+  band.frequency.exponentialRampToValueAtTime(900, t0 + dur);
+
+  // Gain well above 1: the bandpass throws away most of the noise energy, so
+  // the burst needs the headroom back to sit alongside the sampled cues.
+  const peak = 1.8 * volume * getMusicVolume() * getEffectsVolume();
+  const gain = new GainNode(ac, { gain: 0 });
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(peak, t0 + 0.07);
+  gain.gain.linearRampToValueAtTime(peak * 0.6, t0 + dur * 0.6);
+  gain.gain.linearRampToValueAtTime(0, t0 + dur);
+
+  const source = new AudioBufferSourceNode(ac, { buffer });
+  source
+    .connect(band)
+    .connect(new BiquadFilterNode(ac, { type: "highpass", frequency: 450 }))
+    .connect(gain)
+    .connect(ac.destination);
+  source.start(t0);
+}
+
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -192,9 +231,27 @@ export function playMusic(src: string) {
   const audio = new Audio(src);
   audio.loop = true;
   attachMusic(audio);
-  audio.play().catch(() => {});
+
+  let stopped = false;
+  // Autoplay is usually blocked until the first gesture. If play() is rejected,
+  // wait for one and retry — otherwise the landing music never starts.
+  const wake = () => {
+    window.removeEventListener("pointerdown", wake);
+    window.removeEventListener("keydown", wake);
+    if (stopped) return;
+    musicBus().ac.resume().catch(() => {});
+    audio.play().catch(() => {});
+  };
+  const armWake = () => {
+    window.addEventListener("pointerdown", wake);
+    window.addEventListener("keydown", wake);
+  };
+  audio.play().catch(armWake);
 
   return () => {
+    stopped = true;
+    window.removeEventListener("pointerdown", wake);
+    window.removeEventListener("keydown", wake);
     audio.pause();
     audio.removeAttribute("src");
     audio.load();

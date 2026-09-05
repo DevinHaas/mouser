@@ -37,14 +37,25 @@ const CAM_FOV = 40;
 /** Half the world-height the camera can see at the play plane. */
 const VIEW_HALF_H = Math.tan((CAM_FOV * Math.PI) / 360) * CAM_Z;
 
-/** Where the chest sits (bottom of the field), and the arc its tubes settle into. */
-const CHEST_POS = new THREE.Vector3(0, -BAND_Y + 1.5, 0);
+/** Where the chest sits (bottom of the field), and the arc its tubes settle into.
+ *  x is randomised per round (a round is one page load — PLAY AGAIN reloads). */
+const CHEST_POS = new THREE.Vector3(
+  (Math.random() - 0.5) * 7,
+  -BAND_Y + 1.5,
+  0,
+);
 
 /** Terminal: a fixed spot in the field on the tubes' own z-plane, so the page
- *  scrolls past it like everything else. Right of centre — the astronaut rides
- *  the camera on the left — and clear of the chest's tube arc below it.
- *  x is kept inside the 4:3 half-view (7.76) with room for the 3.0-wide body. */
-const TERMINAL_POS = new THREE.Vector3(5.2, -9.2, 0);
+ *  scrolls past it like everything else. Offset from centre and clear of the
+ *  chest's tube arc; x stays inside the 4:3 half-view (7.76) with room for the
+ *  3.0-wide body (max |x| here is 5.6). */
+// Randomised per round, and always on the opposite side of centre from the
+// chest so its tube arc can't overlap the terminal body.
+const TERMINAL_POS = new THREE.Vector3(
+  (CHEST_POS.x > 0 ? -1 : 1) * (3.8 + Math.random() * 1.8),
+  -9.2 + (Math.random() - 0.5) * 2.6,
+  0,
+);
 const CHEST_ARC = [
   [-1.8, 1.9],
   [0, 2.6],
@@ -136,11 +147,14 @@ function TubeModel({ dim }: { dim?: boolean }) {
     g.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const mats = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
       for (const m of mats) {
         const mat = m as THREE.MeshStandardMaterial;
         if (!mat.color) continue;
-        const gray = mat.color.r * 0.299 + mat.color.g * 0.587 + mat.color.b * 0.114;
+        const gray =
+          mat.color.r * 0.299 + mat.color.g * 0.587 + mat.color.b * 0.114;
         mat.color.setScalar(gray * 0.45);
         mat.emissive?.setScalar(0);
       }
@@ -272,7 +286,12 @@ function Burst({ at }: { at: THREE.Vector3 }) {
     if (sparks.current) {
       const pos = fx.geo.attributes.position as THREE.BufferAttribute;
       fx.dirs.forEach((d, i) =>
-        pos.setXYZ(i, d.x * ease * fx.reach, d.y * ease * fx.reach, d.z * ease * fx.reach),
+        pos.setXYZ(
+          i,
+          d.x * ease * fx.reach,
+          d.y * ease * fx.reach,
+          d.z * ease * fx.reach,
+        ),
       );
       pos.needsUpdate = true;
       (sparks.current.material as THREE.PointsMaterial).opacity = 1 - k;
@@ -284,7 +303,11 @@ function Burst({ at }: { at: THREE.Vector3 }) {
       <pointLight ref={light} color={fx.ringColor} distance={14} />
       <mesh ref={ring}>
         <torusGeometry args={[0.6, 0.035, 8, 64]} />
-        <meshBasicMaterial color={fx.ringColor} transparent toneMapped={false} />
+        <meshBasicMaterial
+          color={fx.ringColor}
+          transparent
+          toneMapped={false}
+        />
       </mesh>
       <points ref={sparks} geometry={fx.geo}>
         <pointsMaterial
@@ -309,7 +332,9 @@ function placeButton(
   const v = new THREE.Vector3().copy(at).project(camera);
   const fov = (camera as THREE.PerspectiveCamera).fov;
   const fovScale = size.height / (2 * Math.tan((fov * Math.PI) / 360));
-  const px = Math.round((fovScale * worldSize) / camera.position.distanceTo(at));
+  const px = Math.round(
+    (fovScale * worldSize) / camera.position.distanceTo(at),
+  );
   btn.style.left = `${(v.x * 0.5 + 0.5) * size.width}px`;
   btn.style.top = `${(-v.y * 0.5 + 0.5) * size.height}px`;
   btn.style.width = `${px}px`;
@@ -346,7 +371,10 @@ function Field({
       if (!g) continue;
       // Widest x a tube may occupy at the current aspect. Free tubes scale into
       // it; the chest's arc is clamped to it.
-      const limit = Math.max(0.6, VIEW_HALF_H * (size.width / size.height) - X_MARGIN);
+      const limit = Math.max(
+        0.6,
+        VIEW_HALF_H * (size.width / size.height) - X_MARGIN,
+      );
       const x =
         tube.xFrac !== undefined
           ? tube.xFrac * limit
@@ -363,7 +391,8 @@ function Field({
       // Chest tubes fly up out of the lid and grow into their arc slot.
       if (tube.fromChest) {
         if (spawn.current === null) spawn.current = time;
-        const ease = 1 - Math.pow(1 - Math.min(1, (time - spawn.current) / 0.9), 3);
+        const ease =
+          1 - Math.pow(1 - Math.min(1, (time - spawn.current) / 0.9), 3);
         g.position.lerpVectors(CHEST_POS, g.position, ease);
         scale *= ease;
       }
@@ -371,7 +400,11 @@ function Field({
       livePos.current[tube.id] = g.position.clone();
       // In-plane rock only. Free tumbling on x/y pitched tubes toward and away
       // from the camera, which read as the whole field being off-axis.
-      g.rotation.set(0, 0, Math.sin(time * 0.35 + tube.phase) * 0.3 * Math.sign(tube.spin));
+      g.rotation.set(
+        0,
+        0,
+        Math.sin(time * 0.35 + tube.phase) * 0.3 * Math.sign(tube.spin),
+      );
       if (btn) placeButton(btn, g.position, camera, size, 1.5);
     }
   });
@@ -390,7 +423,9 @@ function Field({
               }}
             >
               <TubeModel dim={!active} />
-              {active && <pointLight color={GLOW} distance={5} intensity={16} />}
+              {active && (
+                <pointLight color={GLOW} distance={5} intensity={16} />
+              )}
             </group>
           );
         })}
@@ -408,7 +443,10 @@ function useGlowTexture() {
     for (let i = 0; i <= 24; i++) {
       const k = i / 24;
       // alpha falls off on a steep curve, so the edge dissolves instead of ending
-      g.addColorStop(k, `rgba(255, ${Math.round(190 - k * 90)}, ${Math.round(110 - k * 90)}, ${Math.pow(1 - k, 3.2)})`);
+      g.addColorStop(
+        k,
+        `rgba(255, ${Math.round(190 - k * 90)}, ${Math.round(110 - k * 90)}, ${Math.pow(1 - k, 3.2)})`,
+      );
     }
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, 256, 256);
@@ -471,7 +509,8 @@ function Chest({
       root.current.rotation.y = -Math.PI / 2 + Math.sin(time * 0.5) * 0.05;
       root.current.rotation.z = Math.sin(time * 0.7) * 0.025;
       if (aura.current) aura.current.position.y = CHEST_POS.y + bob + 0.5;
-      if (hitRef.current && !opened) placeButton(hitRef.current, root.current.position, camera, size, 2.6);
+      if (hitRef.current && !opened)
+        placeButton(hitRef.current, root.current.position, camera, size, 2.6);
     }
     if (!opened || stage.current.gone) return;
     t.current += dt;
@@ -482,7 +521,8 @@ function Chest({
       THREE.MathUtils.clamp((k - 0.5) / 0.8, 0, 1) *
       (1 - THREE.MathUtils.clamp((k - T_CLOSE) / 1.2, 0, 1));
     if (glow.current) glow.current.intensity = 90 * lit;
-    if (orb.current) orb.current.scale.setScalar(lit * (1 + Math.sin(k * 9) * 0.07));
+    if (orb.current)
+      orb.current.scale.setScalar(lit * (1 + Math.sin(k * 9) * 0.07));
 
     if (!stage.current.released && k >= T_RELEASE) {
       stage.current.released = true;
@@ -515,10 +555,18 @@ function Chest({
 
   return (
     <>
-      <group ref={root} position={CHEST_POS} rotation={[0, -Math.PI / 2, 0]} scale={fit.s}>
+      <group
+        ref={root}
+        position={CHEST_POS}
+        rotation={[0, -Math.PI / 2, 0]}
+        scale={fit.s}
+      >
         <primitive object={scene} position={fit.offset} />
       </group>
-      <group ref={aura} position={[CHEST_POS.x, CHEST_POS.y + 0.5, CHEST_POS.z]}>
+      <group
+        ref={aura}
+        position={[CHEST_POS.x, CHEST_POS.y + 0.5, CHEST_POS.z]}
+      >
         <pointLight ref={glow} color={GLOW} distance={16} intensity={0} />
         <group ref={orb} scale={0}>
           {/* neon core plus two ever-wider haloes: overlapping falloffs read as one beam */}
@@ -586,7 +634,11 @@ function ArrowCue({ dir }: { dir: "up" | "down" | null }) {
   if (!dir) return null;
   return (
     <div className={`arrow-cue arrow-cue--${dir}`} aria-hidden="true">
-      <Canvas camera={{ position: [0, 0, 3.2], fov: 45 }} dpr={[1, 1.5]} gl={{ alpha: true }}>
+      <Canvas
+        camera={{ position: [0, 0, 3.2], fov: 45 }}
+        dpr={[1, 1.5]}
+        gl={{ alpha: true }}
+      >
         <ambientLight intensity={2} />
         <directionalLight position={[2, 3, 4]} intensity={3} />
         <ArrowModel dir={dir} />
@@ -656,8 +708,11 @@ function useMouseWatch() {
 
 /** Cyberpunk landing overlay: title, start button, and an optional login. */
 function StartScreen({ onStart }: { onStart: () => void }) {
-  const { data: session } = authClient.useSession();
+  const { data: session, isPending } = authClient.useSession();
   const [showAuth, setShowAuth] = useState(false);
+  // ponytail: hide the sign-in affordances until we know the auth state, so a
+  // logged-in user never sees a flash of "sign in" / "no account needed".
+  const showSignIn = !isPending && !session;
 
   const hover = useMemo(() => makeHoverSfx("/music/hover.mp3"), []);
   useEffect(() => hover.stop, [hover]);
@@ -693,7 +748,7 @@ function StartScreen({ onStart }: { onStart: () => void }) {
         <span className="t-highlight">MOUSER</span>
         <span className="t-fill">MOUSER</span>
       </h1>
-      <p className="start-sub">KEYBOARD-ONLY TUBE COLLECTOR</p>
+      <p className="start-sub">Test your mousless skills in space</p>
       <button
         type="button"
         className="start-btn frame-btn"
@@ -709,11 +764,13 @@ function StartScreen({ onStart }: { onStart: () => void }) {
       >
         START GAME
       </button>
-      <p className="start-hint">
-        no account needed — sign in only to save your time
-      </p>
+      {showSignIn && (
+        <p className="start-hint">
+          no account needed — sign in only to save your time
+        </p>
+      )}
 
-      {session ? null : showAuth ? (
+      {!showSignIn ? null : showAuth ? (
         <AuthWidget />
       ) : (
         <button
@@ -737,7 +794,9 @@ function StartScreen({ onStart }: { onStart: () => void }) {
 
 export function MouserGame() {
   const [tubes] = useState(makeTubes);
-  const [live, setLive] = useState(() => tubes.filter((t) => !t.fromChest).map((t) => t.id));
+  const [live, setLive] = useState(() =>
+    tubes.filter((t) => !t.fromChest).map((t) => t.id),
+  );
   const [chestOpen, setChestOpen] = useState(false);
   const [chestGone, setChestGone] = useState(false);
   const [bursts, setBursts] = useState<{ key: number; at: THREE.Vector3 }[]>(
@@ -747,14 +806,14 @@ export function MouserGame() {
   const [warn, setWarn] = useState(false);
   const [finalTime, setFinalTime] = useState<number | null>(null);
   // ponytail: PLAY AGAIN links to /?play=1 — skip the start screen on return.
-  const [started, setStarted] = useState(
-    () => new URLSearchParams(location.search).has("play"),
+  const [started, setStarted] = useState(() =>
+    new URLSearchParams(location.search).has("play"),
   );
   const [paused, setPaused] = useState(false);
   // Story panels between START and level 1 — shown until the player has seen
   // them once, and re-openable only via the ⌘K command bar (/?intro=1).
-  const [intro, setIntro] = useState(
-    () => new URLSearchParams(location.search).has("intro"),
+  const [intro, setIntro] = useState(() =>
+    new URLSearchParams(location.search).has("intro"),
   );
   // Terminal: `camLocked` is camera ownership (held across both zooms),
   // `terminalDone` is the level gate.
@@ -762,7 +821,9 @@ export function MouserGame() {
   const [terminalDone, setTerminalDone] = useState(false);
   // Refuel step: `refuelAt` is the viewport point the panel hangs off (null =
   // shut), `fuelDone` is the level gate.
-  const [refuelAt, setRefuelAt] = useState<{ x: number; y: number } | null>(null);
+  const [refuelAt, setRefuelAt] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const [fuelDone, setFuelDone] = useState(false);
   const hits = useRef<Record<number, HTMLButtonElement | null>>({});
   const chestHit = useRef<HTMLButtonElement | null>(null);
@@ -998,7 +1059,10 @@ export function MouserGame() {
     marks.current.push(performance.now() - start.current);
     flagMouse(e);
     const at = livePos.current[tube.id] ?? tube.base.clone();
-    playOnce(Math.random() < 0.5 ? "/music/explosion.mp3" : "/music/explosion2.mp3", 0.25);
+    playOnce(
+      Math.random() < 0.5 ? "/music/explosion.mp3" : "/music/explosion2.mp3",
+      0.25,
+    );
     const key = ++burstId.current;
     setBursts((b) => [...b, { key, at }]);
     setTimeout(() => setBursts((b) => b.filter((x) => x.key !== key)), 1200);
@@ -1014,7 +1078,12 @@ export function MouserGame() {
       <div className="game-area" style={{ height: `${LEVELS * 100}vh` }}>
         <Canvas
           className="game-canvas"
-          style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh" }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            width: "100vw",
+            height: "100vh",
+          }}
           camera={{ position: [0, BAND_Y, CAM_Z], fov: CAM_FOV }}
           dpr={[1, 1.75]}
         >
@@ -1024,7 +1093,11 @@ export function MouserGame() {
           <ambientLight intensity={1.1} />
           <ScrollCamera locked={camLocked}>
             <pointLight position={[8, 6, 12]} intensity={260} color="#cfe0ff" />
-            <pointLight position={[-9, -5, 6]} intensity={160} color="#b06cff" />
+            <pointLight
+              position={[-9, -5, 6]}
+              intensity={160}
+              color="#b06cff"
+            />
             <directionalLight position={[0, 4, 8]} intensity={2.2} />
             {/* Background: drifts on his own thrusters, well behind the play field.
                 The boosters are driven by his acceleration, so he banks into every
@@ -1044,7 +1117,13 @@ export function MouserGame() {
             />
           </ScrollCamera>
           <Starfield />
-          <Field tubes={tubes} live={live} activeId={nextRequiredId} hits={hits} livePos={livePos} />
+          <Field
+            tubes={tubes}
+            live={live}
+            activeId={nextRequiredId}
+            hits={hits}
+            livePos={livePos}
+          />
           {/* Outside ScrollCamera on purpose: parented to the rig it would ride
               the camera and never scroll past. Here it sits in the field on the
               tubes' z-plane. The screen faces +X in model space; TerminalScreen
@@ -1061,7 +1140,12 @@ export function MouserGame() {
             <Chest
               opened={chestOpen}
               hitRef={chestHit}
-              onRelease={() => setLive((l) => [...l, ...tubes.filter((t) => t.fromChest).map((t) => t.id)])}
+              onRelease={() =>
+                setLive((l) => [
+                  ...l,
+                  ...tubes.filter((t) => t.fromChest).map((t) => t.id),
+                ])
+              }
               onGone={() => setChestGone(true)}
             />
           )}
@@ -1082,7 +1166,11 @@ export function MouserGame() {
                   key={t.id}
                   type="button"
                   className={`tube-hit${locked ? " tube-hit--locked" : " tube-hit--active"}`}
-                  aria-label={locked ? `Tube ${t.id + 1} — locked, click tubes in order` : `Collect tube ${t.id + 1}`}
+                  aria-label={
+                    locked
+                      ? `Tube ${t.id + 1} — locked, click tubes in order`
+                      : `Collect tube ${t.id + 1}`
+                  }
                   aria-disabled={locked}
                   disabled={locked}
                   ref={(el) => {
@@ -1099,7 +1187,11 @@ export function MouserGame() {
           <button
             type="button"
             className={`tube-hit chest-hit${chestNext ? " tube-hit--active" : " tube-hit--locked"}`}
-            aria-label={chestNext ? "Open the chest" : "Chest — locked, collect the other tubes first"}
+            aria-label={
+              chestNext
+                ? "Open the chest"
+                : "Chest — locked, collect the other tubes first"
+            }
             aria-disabled={!chestNext}
             disabled={!chestNext}
             ref={chestHit}
@@ -1120,7 +1212,9 @@ export function MouserGame() {
         {warn && <div className="warn">MOUSE DETECTED — KEYBOARD ONLY</div>}
 
         {refuelNext && !refuelAt && (
-          <div className="refuel-cue">RIGHT-CLICK THE ASTRONAUT TO REFUEL HIS BOOSTERS</div>
+          <div className="refuel-cue">
+            RIGHT-CLICK THE ASTRONAUT TO REFUEL HIS BOOSTERS
+          </div>
         )}
 
         {refuelAt && (
@@ -1150,8 +1244,7 @@ export function MouserGame() {
             <kbd className="key-space" aria-label="space">
               space
             </kbd>{" "}
-            to{" "}
-            {paused ? "resume" : "pause"}
+            to {paused ? "resume" : "pause"}
           </p>
         )}
 
@@ -1179,11 +1272,11 @@ export function MouserGame() {
           </div>
         )}
 
-        {!started && !intro && (
-          <StartScreen onStart={beginGame} />
-        )}
+        {!started && !intro && <StartScreen onStart={beginGame} />}
 
-        {intro && <IntroSequence onDone={finishIntro} />}
+        {intro && (
+          <IntroSequence onDone={finishIntro} onExit={() => setIntro(false)} />
+        )}
 
         {done && (
           <div className="endcard">

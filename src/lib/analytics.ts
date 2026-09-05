@@ -34,7 +34,9 @@ initAnalytics();
 
 export function hasSeenIntro(): boolean {
   try {
-    if (started && posthog.get_property("intro_seen")) return true;
+    // ponytail: dev never consults PostHog — intro-seen is localStorage only
+    if (!import.meta.env.DEV && started && posthog.get_property("intro_seen"))
+      return true;
     return localStorage.getItem(LEGACY_KEY) === "1";
   } catch {
     return false;
@@ -47,7 +49,7 @@ export function markIntroSeen() {
   } catch {
     // private mode — the super property below still holds for this session
   }
-  if (started) {
+  if (!import.meta.env.DEV && started) {
     posthog.register({ intro_seen: true });
     posthog.capture("intro_completed");
   }
