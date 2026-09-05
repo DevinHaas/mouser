@@ -33,6 +33,12 @@ assert.equal(suit.skeleton.bones.length, 14);
 const other = clone(scene);
 const elbow = scene.getObjectByName('Forearm_L') as Bone;
 const rest = elbow.quaternion.clone();
+const shoulder = scene.getObjectByName('UpperArm_L') as Bone;
+const shoulderRest = shoulder.quaternion.clone();
+const knee = scene.getObjectByName('Shin_L') as Bone;
+const kneeRest = knee.quaternion.clone();
+const head = scene.getObjectByName('Head') as Bone;
+const headRest = head.quaternion.clone();
 const nozzle = scene.getObjectByName('Booster_L')!;
 scene.updateMatrixWorld(true);
 const nozzleRest = nozzle.getWorldPosition(new Vector3());
@@ -45,7 +51,21 @@ for (let i = 0; i < weights.count; i++) {
 const pose = makeBodyRig(scene);
 for (let i = 0; i < 120; i++) pose(i / 60, 1 / 60, .8, .1, -.12, .08);
 scene.updateMatrixWorld(true);
-assert.ok(elbow.quaternion.angleTo(rest) > .2, 'elbow should bend');
+// Arms rest near-straight and only bend on the reach pulse — check both ends of it.
+assert.ok(elbow.quaternion.angleTo(rest) < .2, 'elbow stays straight between reaches');
+for (let i = 0; i < 120; i++) pose(7.98, 1 / 60, .8, .1, -.12, .08);
+scene.updateMatrixWorld(true);
+assert.ok(elbow.quaternion.angleTo(rest) > .2, 'elbow should bend at the top of a reach');
+// The other gesture throws the arm out from the shoulder with the elbow straight.
+for (let i = 0; i < 120; i++) pose(14.7, 1 / 60, .8, .1, -.12, .08);
+scene.updateMatrixWorld(true);
+assert.ok(shoulder.quaternion.angleTo(shoulderRest) > .3, 'shoulder should swing out');
+assert.ok(elbow.quaternion.angleTo(rest) < .2, 'elbow stays straight while the arm is held out');
+// Legs trail straight and tuck in bursts of their own; the head keeps looking around.
+for (let i = 0; i < 120; i++) pose(16.7, 1 / 60, .8, .1, -.12, .08);
+scene.updateMatrixWorld(true);
+assert.ok(knee.quaternion.angleTo(kneeRest) > .3, 'knee should tuck');
+assert.notEqual(head.quaternion.angleTo(headRest), 0, 'head should keep moving');
 assert.ok((other.getObjectByName('Forearm_L') as Bone).quaternion.equals(rest), 'clones must be independent');
 assert.ok(nozzle.getWorldPosition(new Vector3()).distanceTo(nozzleRest) < 1e-6, 'nozzle stays attached to rigid pack');
 let displaced = 0;
@@ -54,16 +74,18 @@ for (let i = 0; i < suit.geometry.getAttribute('position').count; i++) {
   suit.applyBoneTransform(i, deformed.copy(original));
   assert.ok(deformed.toArray().every(Number.isFinite));
   if (deformed.distanceTo(original) > .015) displaced++;
-  assert.ok(deformed.distanceTo(original) < .3, 'bounded skin displacement');
+  // Suit is 1.0 tall; a full arm gesture legitimately walks a hand ~.4 of that.
+  assert.ok(deformed.distanceTo(original) < .5, 'bounded skin displacement');
 }
 assert.ok(displaced > 1000, 'bones must deform the suit');
 const bent = elbow.quaternion.clone();
 pose(20, 0, 0, 0, 0, 0);
-assert.ok(elbow.quaternion.equals(bent), 'zero delta must not move joints');
+// A slerp still renormalizes at t = 0, so compare rotations, not raw components.
+assert.ok(elbow.quaternion.angleTo(bent) < 1e-6, 'zero delta must not move joints');
 const mixer = new AnimationMixer(scene);
 mixer.clipAction(animations[0]).play();
 mixer.update(.5);
-assert.ok(elbow.quaternion.equals(bent), 'booster clip must not overwrite the pose');
+assert.ok(elbow.quaternion.angleTo(bent) < 1e-6, 'booster clip must not overwrite the pose');
 
 // Cover both sides at the limits of steering/throttle, not just one idle pose.
 // Bounded vertex travel alone misses triangles torn between neighboring bones.
@@ -74,7 +96,7 @@ const edgeStart = new Vector3();
 const edgeEnd = new Vector3();
 for (let direction = 0; direction < 8; direction++) {
   for (const throttle of [0, 1]) {
-    for (const time of [0, 4, 12]) {
+    for (const time of [0, 4, 8, 12, 14.7, 16.7]) {
       for (let frame = 0; frame < 60; frame++) {
         pose(time, .1, throttle, direction & 1 ? .23 : -.23,
           direction & 2 ? .23 : -.23, direction & 4 ? .16 : -.16);
@@ -100,4 +122,4 @@ for (let direction = 0; direction < 8; direction++) {
 scene.traverse((node) => {
   if (node instanceof Mesh) node.geometry.dispose();
 });
-console.log('Astronaut rig OK: skin deformation, independent clones, intact boosters, 48 tear-free poses.');
+console.log('Astronaut rig OK: skin deformation, independent clones, intact boosters, 96 tear-free poses.');
