@@ -12,6 +12,7 @@ import { DriftingAstronaut } from "./astronaut-boosters";
 import { TerminalScreen } from "./terminal-screen";
 import { RefuelPanel } from "./refuel-panel";
 import { IntroSequence } from "./intro-sequence";
+import { TurnstileGate } from "./turnstile-gate";
 import { hasSeenIntro, markIntroSeen, trackIntroReplay } from "@/lib/analytics";
 
 const TARGET = 10;
@@ -771,6 +772,10 @@ export function MouserGame() {
   const start = useRef(performance.now());
   const pauseStart = useRef<number | null>(null);
   const wasMouse = useMouseWatch();
+  // Bot screening: one mark per collected tube (ms into the run) plus a
+  // background Turnstile token, both checked server-side in submitRun.
+  const marks = useRef<number[]>([]);
+  const botToken = useRef<string | null>(null);
 
   // Counted, not derived from `live.length`: the chest's three tubes don't
   // exist in `live` until the chest is opened, so deriving it both showed 3/10
@@ -875,6 +880,7 @@ export function MouserGame() {
       return;
     }
     start.current = performance.now();
+    marks.current = [];
     setStarted(true);
   };
 
@@ -882,6 +888,7 @@ export function MouserGame() {
     markIntroSeen();
     setIntro(false);
     start.current = performance.now();
+    marks.current = [];
     setStarted(true);
   };
 
@@ -959,7 +966,12 @@ export function MouserGame() {
   useEffect(() => {
     if (finalTime === null) return;
     actions
-      .submitRun({ timeMs: Math.round(finalTime), cheats })
+      .submitRun({
+        timeMs: Math.round(finalTime),
+        cheats,
+        marks: marks.current.map(Math.round),
+        token: botToken.current,
+      })
       .catch(() => {})
       .then(() => {
         location.href = "/leaderboard";
@@ -983,6 +995,7 @@ export function MouserGame() {
   const collect = (tube: Tube, e: React.MouseEvent) => {
     if (!started || done || paused || !live.includes(tube.id)) return;
     if (tube.id !== nextRequiredId) return; // locked, out of order
+    marks.current.push(performance.now() - start.current);
     flagMouse(e);
     const at = livePos.current[tube.id] ?? tube.base.clone();
     playOnce(Math.random() < 0.5 ? "/music/explosion.mp3" : "/music/explosion2.mp3", 0.25);
@@ -995,6 +1008,7 @@ export function MouserGame() {
 
   return (
     <>
+      <TurnstileGate onToken={(t) => (botToken.current = t)} />
       {/* Tall enough to force scrolling: tubes are spread across LEVELS
           viewport-heights, so this and the canvas below both need the room. */}
       <div className="game-area" style={{ height: `${LEVELS * 100}vh` }}>
