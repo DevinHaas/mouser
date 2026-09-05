@@ -16,6 +16,8 @@ export type PodiumEntry = {
   name: string;
   timeMs: number;
   image: string | null;
+  /** true = placeholder row shown only until the real board fills up */
+  demo?: boolean;
 };
 
 /** Podium heights + plume colors per rank. */
@@ -144,6 +146,19 @@ function PodiumFloater({ entry }: { entry: PodiumEntry }) {
       >
         {fmtTime(entry.timeMs)}
       </Text>
+      {entry.demo && (
+        <Text
+          position={[0, -2.4, 0]}
+          font={BODY_FONT}
+          fontSize={0.16}
+          color="#8a8fb0"
+          outlineWidth={0.01}
+          outlineColor="#03040c"
+          anchorX="center"
+        >
+          DEMO
+        </Text>
+      )}
       </group>
     </group>
   );

@@ -4,11 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "bun run db:migrate",
     "dev": "astro dev",
     "build": "astro build",
     "lint": "eslint .",
     "preview": "astro preview",
-    "db:push": "drizzle-kit push"
+    "start": "bun run db:migrate && node ./dist/server/entry.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run src/lib/db/migrate.ts"
   },
   "dependencies": {
     "@astrojs/node": "^11.1.5",

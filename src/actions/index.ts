@@ -5,18 +5,14 @@ import { db } from '@/lib/db'
 import { runs, user } from '@/lib/db/schema'
 import { and, asc, count, eq, lt, min } from 'drizzle-orm'
 import { padTop3 } from '@/lib/mock-leaderboard'
+import { bestRunPerUser } from '@/lib/leaderboard-query'
 import { paceFault, turnstileOk } from '@/lib/anti-bot'
 
 export const server = {
   /** Podium rows for the start-screen leaderboard dock. */
   topThree: defineAction({
     handler: async () => {
-      const rows = await db
-        .select({ name: user.name, timeMs: runs.timeMs, image: user.image })
-        .from(runs)
-        .innerJoin(user, eq(runs.userId, user.id))
-        .where(eq(runs.cheats, 0))
-        .orderBy(asc(runs.timeMs))
+      const rows = await bestRunPerUser()
         .limit(3)
         .catch(() => [])
       return padTop3(rows)
@@ -77,7 +73,12 @@ export const server = {
       })()
 
       if (!session) return { saved: false, preview, rejected: null }
-      await db.insert(runs).values({ userId: session.user.id, timeMs, cheats })
+      await db.insert(runs).values({
+        userId: session.user.id,
+        timeMs,
+        cheats,
+        mouselessTool: session.user.mouselessTool ?? null,
+      })
       return { saved: true, preview, rejected: null }
     },
   }),

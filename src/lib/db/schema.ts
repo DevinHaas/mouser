@@ -63,5 +63,7 @@ export const runs = pgTable('runs', {
     .references(() => user.id, { onDelete: 'cascade' }),
   timeMs: integer('time_ms').notNull(),
   cheats: integer('cheats').notNull(),
+  // tool used for this run — snapshotted at submit so it never shifts when the user re-picks
+  mouselessTool: text('mouseless_tool'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 })

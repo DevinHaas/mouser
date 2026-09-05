@@ -13,15 +13,15 @@ const MOCK = [
 
 export type Row = { name: string; timeMs: number; image: string | null }
 
-/** Real rows first, mock rows filling the rest, re-sorted by time. */
+/** Real rows first, mock rows filling the rest, re-sorted by time. Padded rows are flagged demo. */
 export function padTop3(rows: Row[]): PodiumEntry[] {
-  const filled: Row[] = [...rows]
+  const filled: (Row & { demo?: boolean })[] = [...rows]
   for (const m of MOCK) {
     if (filled.length >= 3) break
-    filled.push(m)
+    filled.push({ ...m, demo: true })
   }
   return filled
     .sort((a, b) => a.timeMs - b.timeMs)
     .slice(0, 3)
-    .map((r, i) => ({ ...r, rank: (i + 1) as 1 | 2 | 3 }))
+    .map((r, i) => ({ ...r, rank: (i + 1) as 1 | 2 | 3, demo: r.demo ?? false }))
 }
