@@ -2,21 +2,53 @@
 import '../styles/index.css'
 import { CommandMenu } from '../components/command-menu'
 import { ProfileMenu } from '../components/profile-menu'
+
+interface Props {
+  title?: string
+  description?: string
+}
+
+const {
+  title = 'Mouser',
+  description = 'Mouser is a keyboard-driven space arcade game. Ditch the mouse, master the keys, climb the leaderboard.',
+} = Astro.props
+
+const ogImage = new URL('/og-image.png', Astro.site).href
+const canonical = new URL(Astro.url.pathname, Astro.site).href
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png" sizes="512x512" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#000000" />
+
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Mouser" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
       rel="stylesheet"
     />
-    <title>Mouser</title>
   </head>
   <body>
     <CommandMenu client:only="react" />
