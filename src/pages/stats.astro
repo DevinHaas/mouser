@@ -1,0 +1,481 @@
+---
+import Layout from '../layouts/Layout.astro'
+import { auth } from '@/lib/auth'
+import { db } from '@/lib/db'
+import { runs } from '@/lib/db/schema'
+import { and, asc, count, eq, lt, min, sum } from 'drizzle-orm'
+import { fmtTime } from '@/lib/format'
+import { ToolPicker } from '@/components/tool-picker'
+
+const session = await auth.api.getSession({ headers: Astro.request.headers })
+if (!session) return Astro.redirect('/')
+
+const clean = and(eq(runs.userId, session.user.id), eq(runs.cheats, 0))
+
+const [totals, bestRow, timePlayed, cleanRuns] = await Promise.all([
+  db.select({ n: count() }).from(runs).where(eq(runs.userId, session.user.id)),
+  db.select({ t: min(runs.timeMs) }).from(runs).where(clean),
+  db.select({ ms: sum(runs.timeMs) }).from(runs).where(eq(runs.userId, session.user.id)),
+  db
+    .select({ timeMs: runs.timeMs, createdAt: runs.createdAt })
+    .from(runs)
+    .where(clean)
+    .orderBy(asc(runs.createdAt)),
+])
+
+const best = bestRow[0]?.t ?? null
+const rank = best
+  ? (await db.select({ n: count() }).from(runs).where(and(eq(runs.cheats, 0), lt(runs.timeMs, best))))[0].n + 1
+  : null
+
+const testsStarted = totals[0]?.n ?? 0
+const testsCompleted = cleanRuns.length
+const msPlayed = Number(timePlayed[0]?.ms ?? 0)
+
+function fmtDuration(ms: number) {
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
+const last10 = cleanRuns.slice(-10)
+const avg = (rows: typeof cleanRuns) => (rows.length ? rows.reduce((a, r) => a + r.timeMs, 0) / rows.length : null)
+const avgAll = avg(cleanRuns)
+const avgLast10 = avg(last10)
+
+// --- activity heatmap: last 12 months, one cell per day, rows = weekday ---
+const DAY_MS = 86_400_000
+const today = new Date()
+const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))
+start.setUTCDate(start.getUTCDate() - 364)
+start.setUTCDate(start.getUTCDate() - start.getUTCDay()) // back up to the preceding Sunday
+
+const dayCounts = new Map<string, number>()
+for (const r of cleanRuns) {
+  const key = r.createdAt.toISOString().slice(0, 10)
+  dayCounts.set(key, (dayCounts.get(key) ?? 0) + 1)
+}
+
+const weeks = Math.ceil((Date.now() - start.getTime()) / (7 * DAY_MS)) + 1
+const heatmap: { key: string; n: number }[][] = Array.from({ length: 7 }, () => [])
+for (let i = 0; i < weeks * 7; i++) {
+  const d = new Date(start.getTime() + i * DAY_MS)
+  const key = d.toISOString().slice(0, 10)
+  heatmap[d.getUTCDay()].push({ key, n: d > today ? -1 : (dayCounts.get(key) ?? 0) })
+}
+const maxDay = Math.max(1, ...[...dayCounts.values()])
+const weekdayLabels = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
+function level(n: number) {
+  if (n < 0) return -1
+  if (n === 0) return 0
+  const frac = n / maxDay
+  return frac > 0.75 ? 4 : frac > 0.5 ? 3 : frac > 0.25 ? 2 : 1
+}
+
+// --- progress chart: time per run (seconds) + rolling avg of 10 ---
+// ponytail: 5 is a guess at "enough to look like a trend, not noise" — tune if it feels off.
+const MIN_PROGRESS_RUNS = 5
+const W = 900
+const H = 220
+const seconds = cleanRuns.map((r) => r.timeMs / 1000)
+const minS = seconds.length ? Math.min(...seconds) : 0
+const maxS = seconds.length ? Math.max(...seconds) : 1
+const pad = (maxS - minS) * 0.1 || 1
+const yLo = Math.max(0, minS - pad)
+const yHi = maxS + pad
+const x = (i: number) => (seconds.length > 1 ? (i / (seconds.length - 1)) * W : W / 2)
+const y = (s: number) => H - ((s - yLo) / (yHi - yLo)) * H
+
+const rolling = seconds.map((_, i) => {
+  const win = seconds.slice(Math.max(0, i - 9), i + 1)
+  return win.reduce((a, b) => a + b, 0) / win.length
+})
+const rollingPath = rolling.map((s, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(s).toFixed(1)}`).join(' ')
+
+// --- histogram of run times, bucketed by 5s ---
+const bucketSize = 5
+const histogram = new Map<number, number>()
+for (const s of seconds) {
+  const b = Math.floor(s / bucketSize) * bucketSize
+  histogram.set(b, (histogram.get(b) ?? 0) + 1)
+}
+const buckets = [...histogram.keys()].sort((a, b) => a - b)
+const maxBucket = Math.max(1, ...histogram.values())
+---
+
+<Layout>
+  <main class="stats">
+    <h1 class="title-fx">
+      <span class="t-sticker">USER STATS</span>
+      <span class="t-extrude">USER STATS</span>
+      <span class="t-highlight">USER STATS</span>
+      <span class="t-fill">USER STATS</span>
+    </h1>
+
+    <section class="panel summary">
+      <div class="summary-name">
+        {session.user.name}
+        <span class="joined">joined {new Date(session.user.createdAt).toLocaleDateString()}</span>
+        <ToolPicker client:only="react" initial={session.user.mouselessTool ?? null} />
+      </div>
+      <div class="summary-stat">
+        <dt>runs started</dt>
+        <dd>{testsStarted}</dd>
+      </div>
+      <div class="summary-stat">
+        <dt>runs completed</dt>
+        <dd>{testsCompleted}</dd>
+      </div>
+      <div class="summary-stat">
+        <dt>time playing</dt>
+        <dd>{fmtDuration(msPlayed)}</dd>
+      </div>
+    </section>
+
+    <a class="panel rank-panel" href="/leaderboard">
+      <div class="panel-title">leaderboard rank</div>
+      <div class="panel-title-value">{rank ?? '—'}</div>
+      <div class="rank-cta">VIEW GLOBAL LEADERBOARD</div>
+    </a>
+
+    <section class="panel best-times">
+      <div class="best-stat">
+        <dt>personal best</dt>
+        <dd>{best !== null ? fmtTime(best) : '—'}</dd>
+      </div>
+      <div class="best-stat">
+        <dt>last 10 avg</dt>
+        <dd>{avgLast10 !== null ? fmtTime(avgLast10) : '—'}</dd>
+      </div>
+      <div class="best-stat">
+        <dt>all-time avg</dt>
+        <dd>{avgAll !== null ? fmtTime(avgAll) : '—'}</dd>
+      </div>
+    </section>
+
+    <section class="panel heatmap">
+      <div class="heatmap-head">
+        <span>last 12 months</span>
+        <span>{testsCompleted} runs</span>
+      </div>
+      <div class="heatmap-grid">
+        {heatmap.map((row, d) => (
+          <div class="heatmap-row">
+            <span class="heatmap-label">{d % 2 === 1 ? weekdayLabels[d] : ''}</span>
+            <div class="heatmap-cells" style={`grid-template-columns: repeat(${weeks}, 1fr)`}>
+              {row.map((cell) => (
+                <span
+                  class="heatmap-cell"
+                  data-level={level(cell.n)}
+                  title={cell.n >= 0 ? `${cell.key}: ${cell.n} run${cell.n === 1 ? '' : 's'}` : ''}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p class="heatmap-note">Note: all activity data is using UTC time.</p>
+    </section>
+
+    <section class="panel progress">
+      <div class="panel-title">time per run</div>
+      {seconds.length >= MIN_PROGRESS_RUNS ? (
+        <>
+          <svg viewBox={`0 0 ${W} ${H}`} class="progress-svg" preserveAspectRatio="none">
+            {seconds.map((s, i) => (
+              <circle cx={x(i)} cy={y(s)} r="2.2" class="progress-dot" />
+            ))}
+            <path d={rollingPath} class="progress-line" />
+          </svg>
+          <div class="hist">
+            {buckets.map((b) => (
+              <div class="hist-bar" style={`--h: ${((histogram.get(b) ?? 0) / maxBucket) * 100}%`} title={`${b}-${b + bucketSize}s: ${histogram.get(b)} runs`} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <p class="empty">
+          play {MIN_PROGRESS_RUNS - seconds.length} more run{MIN_PROGRESS_RUNS - seconds.length === 1 ? '' : 's'} to unlock your progress chart
+        </p>
+      )}
+    </section>
+
+    <a href="/" class="back-link"><span class="pixel-arrow" aria-hidden="true"></span>DASHBOARD</a>
+  </main>
+</Layout>
+
+<style>
+  .rank-panel {
+    color: inherit;
+    text-decoration: none;
+  }
+  .rank-cta {
+    font-size: 8px;
+    letter-spacing: 1px;
+    opacity: 0.6;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .rank-panel:hover .rank-cta,
+  .rank-panel:focus-visible .rank-cta {
+    opacity: 1;
+  }
+  .stats {
+    min-height: 100vh;
+    display: grid;
+    justify-items: center;
+    gap: 24px;
+    padding: 48px 24px 80px;
+    color: #f0c4bc;
+    font-family: 'Press Start 2P', system-ui, sans-serif;
+    font-size: 12px;
+  }
+  h1 {
+    justify-items: center;
+  }
+  h1 > span {
+    font-size: clamp(32px, 7vw, 72px);
+  }
+
+  .panel {
+    width: min(900px, 92vw);
+    background: rgba(240, 196, 188, 0.06);
+    border: 1px solid rgba(255, 122, 40, 0.25);
+    border-radius: 4px;
+    padding: 20px 24px;
+  }
+
+  dt {
+    opacity: 0.6;
+    font-size: 9px;
+    margin: 0 0 8px;
+  }
+  dd {
+    margin: 0;
+    color: var(--accent);
+  }
+
+  .summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+  .summary-name {
+    font-size: 16px;
+    display: grid;
+    gap: 6px;
+  }
+  .joined {
+    font-size: 9px;
+    opacity: 0.6;
+  }
+  .summary-stat dd {
+    font-size: 18px;
+  }
+
+  .panel-title {
+    opacity: 0.6;
+    font-size: 9px;
+    margin-bottom: 8px;
+  }
+  .panel-title-value {
+    font-size: 24px;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+
+  .best-times {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px 48px;
+  }
+  .best-stat dd {
+    font-size: 20px;
+  }
+
+  .heatmap-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    opacity: 0.7;
+    margin-bottom: 12px;
+  }
+  .heatmap-grid {
+    display: grid;
+    gap: 4px;
+  }
+  .heatmap-row {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .heatmap-label {
+    width: 70px;
+    flex: none;
+    font-size: 8px;
+    opacity: 0.6;
+    text-align: right;
+    align-self: center;
+  }
+  .heatmap-cells {
+    display: grid;
+    flex: 1;
+    gap: 4px;
+  }
+  .heatmap-cell {
+    aspect-ratio: 1;
+    width: 100%;
+    border-radius: 2px;
+    background: rgba(255, 122, 40, 0.08);
+  }
+  .heatmap-cell[data-level='-1'] {
+    background: transparent;
+  }
+  .heatmap-cell[data-level='1'] {
+    background: rgba(255, 122, 40, 0.3);
+  }
+  .heatmap-cell[data-level='2'] {
+    background: rgba(255, 122, 40, 0.55);
+  }
+  .heatmap-cell[data-level='3'] {
+    background: rgba(255, 122, 40, 0.8);
+  }
+  .heatmap-cell[data-level='4'] {
+    background: var(--neon);
+    box-shadow: 0 0 6px var(--neon-glow);
+  }
+  .heatmap-note {
+    margin: 12px 0 0;
+    font-size: 8px;
+    opacity: 0.5;
+  }
+
+  .progress-svg {
+    width: 100%;
+    height: 220px;
+    display: block;
+  }
+  .progress-dot {
+    fill: rgba(255, 122, 40, 0.4);
+  }
+  .progress-line {
+    fill: none;
+    stroke: var(--neon);
+    stroke-width: 2;
+    filter: drop-shadow(0 0 4px var(--neon-glow));
+  }
+  .empty {
+    opacity: 0.5;
+    font-size: 10px;
+  }
+
+  .hist {
+    margin-top: 16px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 80px;
+  }
+  .hist-bar {
+    flex: 1;
+    height: var(--h);
+    min-height: 1px;
+    background: var(--accent);
+  }
+</style>
+
+{/* ponytail: global, not scoped — ToolPicker is client:only="react", so Astro's scoped
+    style attributes never reach its DOM. Scoped rules here would silently no-op. */}
+<style is:global>
+  .tool-picker {
+    position: relative;
+    display: grid;
+    gap: 4px;
+    font-size: 9px;
+    font-family: 'Press Start 2P', system-ui, sans-serif;
+  }
+  .tool-picker-label {
+    opacity: 0.6;
+  }
+  .tool-picker-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 160px;
+    font-family: inherit;
+    font-size: 9px;
+    line-height: 1.4;
+    background: rgba(240, 196, 188, 0.06);
+    color: #f0c4bc;
+    border: 1px solid rgba(255, 122, 40, 0.25);
+    border-radius: 4px;
+    padding: 6px 8px;
+    cursor: pointer;
+  }
+  .tool-picker-btn:hover {
+    border-color: rgba(255, 122, 40, 0.5);
+  }
+  .tool-picker-btn:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--neon-glow);
+  }
+  .tool-picker-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .tool-picker-arrow {
+    flex: none;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #f0c4bc;
+  }
+  .tool-picker-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 10;
+    min-width: 160px;
+    max-height: 240px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    background: #1a1113;
+    border: 1px solid rgba(255, 122, 40, 0.4);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .tool-picker-list li {
+    margin: 0;
+  }
+  .tool-picker-list button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+    font-size: 9px;
+    line-height: 1.4;
+    color: #f0c4bc;
+    background: none;
+    border: none;
+    border-radius: 2px;
+    padding: 8px;
+    cursor: pointer;
+  }
+  .tool-picker-list button:hover,
+  .tool-picker-list button:focus-visible {
+    outline: none;
+    background: rgba(255, 122, 40, 0.2);
+  }
+  .tool-picker-list li[aria-selected='true'] button {
+    color: var(--neon);
+  }
+</style>

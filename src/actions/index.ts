@@ -1,0 +1,67 @@
+import { defineAction } from 'astro:actions'
+import { z } from 'astro:schema'
+import { auth } from '@/lib/auth'
+import { db } from '@/lib/db'
+import { runs, user } from '@/lib/db/schema'
+import { and, asc, count, eq, lt, min } from 'drizzle-orm'
+import { padTop3 } from '@/lib/mock-leaderboard'
+
+export const server = {
+  /** Podium rows for the start-screen leaderboard dock. */
+  topThree: defineAction({
+    handler: async () => {
+      const rows = await db
+        .select({ name: user.name, timeMs: runs.timeMs, image: user.image })
+        .from(runs)
+        .innerJoin(user, eq(runs.userId, user.id))
+        .where(eq(runs.cheats, 0))
+        .orderBy(asc(runs.timeMs))
+        .limit(3)
+        .catch(() => [])
+      return padTop3(rows)
+    },
+  }),
+
+  /**
+   * Ranks the finished run against the cheat-free board, then saves it when
+   * logged in. Ranking happens before the insert so the run never counts itself.
+   */
+  submitRun: defineAction({
+    input: z.object({ timeMs: z.number().int().positive(), cheats: z.number().int().min(0) }),
+    handler: async ({ timeMs, cheats }, ctx) => {
+      const session = await auth.api.getSession({ headers: ctx.request.headers })
+      const clean = eq(runs.cheats, 0)
+
+      // ponytail: cheated runs are off the board — nothing to rank.
+      const preview = cheats > 0 ? null : await (async () => {
+        const [{ n: faster }] = await db
+          .select({ n: count() })
+          .from(runs)
+          .where(and(clean, lt(runs.timeMs, timeMs)))
+
+        const offset = Math.max(0, faster - 2)
+        const window = await db
+          .select({ name: user.name, timeMs: runs.timeMs })
+          .from(runs)
+          .innerJoin(user, eq(runs.userId, user.id))
+          .where(clean)
+          .orderBy(asc(runs.timeMs))
+          .limit(5)
+          .offset(offset)
+
+        const best = session
+          ? await db
+              .select({ t: min(runs.timeMs) })
+              .from(runs)
+              .where(and(clean, eq(runs.userId, session.user.id)))
+          : []
+
+        return { rank: faster + 1, startRank: offset + 1, rows: window, best: best[0]?.t ?? null }
+      })()
+
+      if (!session) return { saved: false, preview }
+      await db.insert(runs).values({ userId: session.user.id, timeMs, cheats })
+      return { saved: true, preview }
+    },
+  }),
+}

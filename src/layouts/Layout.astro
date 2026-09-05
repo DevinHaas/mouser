@@ -1,0 +1,26 @@
+---
+import '../styles/index.css'
+import { CommandMenu } from '../components/command-menu'
+import { ProfileMenu } from '../components/profile-menu'
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <title>Mouser</title>
+  </head>
+  <body>
+    <CommandMenu client:only="react" />
+    <ProfileMenu client:only="react" />
+    <slot />
+  </body>
+</html>

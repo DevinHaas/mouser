@@ -1,0 +1,97 @@
+---
+import Layout from '../../layouts/Layout.astro'
+import { db } from '@/lib/db'
+import { runs, user } from '@/lib/db/schema'
+import { and, count, eq, min } from 'drizzle-orm'
+import { fmtTime } from '@/lib/format'
+import { MOUSELESS_TOOL_BY_ID } from '@/lib/mouseless-tools'
+
+const { id } = Astro.params
+const [profile] = await db
+  .select({ name: user.name, image: user.image, mouselessTool: user.mouselessTool })
+  .from(user)
+  .where(eq(user.id, id!))
+const tool = profile?.mouselessTool ? MOUSELESS_TOOL_BY_ID.get(profile.mouselessTool) : null
+
+if (!profile) return Astro.redirect('/404')
+
+const clean = and(eq(runs.userId, id!), eq(runs.cheats, 0))
+const [totals, bestRow] = await Promise.all([
+  db.select({ n: count() }).from(runs).where(eq(runs.userId, id!)),
+  db.select({ t: min(runs.timeMs) }).from(runs).where(clean),
+])
+const best = bestRow[0]?.t ?? null
+---
+
+<Layout>
+  <main class="public-profile">
+    {profile.image && <img src={profile.image} alt="" class="avatar" />}
+    <h1 class="title-fx">
+      <span class="t-sticker">{profile.name}</span>
+      <span class="t-extrude">{profile.name}</span>
+      <span class="t-highlight">{profile.name}</span>
+      <span class="t-fill">{profile.name}</span>
+    </h1>
+    {tool && (
+      <a class="tool-badge" href={tool.website} target="_blank" rel="noreferrer" style={`--tool-color:${tool.color}`}>
+        {tool.name}
+      </a>
+    )}
+    <dl class="stats-grid">
+      <dt>runs played</dt>
+      <dd>{totals[0]?.n ?? 0}</dd>
+      <dt>best time</dt>
+      <dd>{best !== null ? fmtTime(best) : '—'}</dd>
+    </dl>
+    <a href="/" class="back-link"><span class="pixel-arrow" aria-hidden="true"></span>DASHBOARD</a>
+  </main>
+</Layout>
+
+<style>
+  .public-profile {
+    min-height: 100vh;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 24px;
+    color: #f0c4bc;
+    font-family: 'Press Start 2P', system-ui, sans-serif;
+    font-size: 12px;
+  }
+  .avatar {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+  }
+  h1 {
+    justify-items: center;
+  }
+  .tool-badge {
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    color: var(--tool-color);
+    border: 1px solid var(--tool-color);
+    text-decoration: none;
+    margin-top: -12px;
+  }
+  h1 > span {
+    font-size: clamp(24px, 6vw, 56px);
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 10px 24px;
+    margin: 0;
+  }
+  .stats-grid dt {
+    opacity: 0.6;
+  }
+  .stats-grid dd {
+    margin: 0;
+    color: var(--accent);
+    text-align: right;
+  }
+</style>

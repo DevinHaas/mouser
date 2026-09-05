@@ -1,0 +1,10 @@
+---
+import Layout from '../layouts/Layout.astro'
+import { MouserGame } from '../components/mouser-game'
+---
+
+<Layout>
+  <div id="root">
+    <MouserGame client:only="react" />
+  </div>
+</Layout>

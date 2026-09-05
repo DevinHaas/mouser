@@ -1,0 +1,43 @@
+---
+import Layout from '../layouts/Layout.astro'
+import { auth } from '@/lib/auth'
+
+const session = await auth.api.getSession({ headers: Astro.request.headers })
+if (!session) return Astro.redirect('/')
+---
+
+<Layout>
+  <main class="friends">
+    <h1 class="title-fx">
+      <span class="t-sticker">FRIENDS</span>
+      <span class="t-extrude">FRIENDS</span>
+      <span class="t-highlight">FRIENDS</span>
+      <span class="t-fill">FRIENDS</span>
+    </h1>
+    <p class="friends-sub">coming soon</p>
+    <a href="/" class="back-link"><span class="pixel-arrow" aria-hidden="true"></span>DASHBOARD</a>
+  </main>
+</Layout>
+
+<style>
+  .friends {
+    min-height: 100vh;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 24px;
+    color: #f0c4bc;
+    font-family: 'Press Start 2P', system-ui, sans-serif;
+    font-size: 12px;
+  }
+  h1 {
+    justify-items: center;
+  }
+  h1 > span {
+    font-size: clamp(32px, 7vw, 72px);
+  }
+  .friends-sub {
+    margin: -14px 0 0;
+    opacity: 0.6;
+  }
+</style>
