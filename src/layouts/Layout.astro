@@ -22,5 +22,9 @@ import { ProfileMenu } from '../components/profile-menu'
     <CommandMenu client:only="react" />
     <ProfileMenu client:only="react" />
     <slot />
+    <script>
+      import { initAnalytics } from '../lib/analytics'
+      initAnalytics()
+    </script>
   </body>
 </html>
