@@ -9,22 +9,32 @@ export const prerender = false
 // callback without a `state`. A genuine anchor -> 302 hop sidesteps that.
 export const GET: APIRoute = async ({ request, url }) => {
   const next = url.searchParams.get('next') ?? '/'
-  const signIn = new Request(new URL('/api/auth/sign-in/social', url), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      // better-auth runs a CSRF origin check on POST; this call is same-origin.
-      origin: url.origin,
-      cookie: request.headers.get('cookie') ?? '',
-    },
-    body: JSON.stringify({ provider: 'github', callbackURL: next }),
-  })
+  try {
+    const signIn = new Request(`${url.origin}/api/auth/sign-in/social`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: url.origin,
+        cookie: request.headers.get('cookie') ?? '',
+      },
+      body: JSON.stringify({ provider: 'github', callbackURL: next }),
+    })
 
-  const res = await auth.handler(signIn)
-  const data = (await res.json().catch(() => null)) as { url?: string } | null
-  if (!data?.url) return new Response('github sign-in unavailable', { status: 502 })
+    const res = await auth.handler(signIn)
+    const data = (await res.clone().json().catch(() => null)) as { url?: string } | null
+    if (!data?.url) {
+      return new Response(`github sign-in failed: ${res.status} ${await res.text()}`, { status: 502 })
+    }
 
-  const headers = new Headers({ location: data.url })
-  for (const cookie of res.headers.getSetCookie()) headers.append('set-cookie', cookie)
-  return new Response(null, { status: 302, headers })
+    // Carry the state cookie(s) better-auth set, swap the 200+body for a 302.
+    const headers = new Headers(res.headers)
+    headers.set('location', data.url)
+    headers.delete('content-type')
+    headers.delete('content-length')
+    return new Response(null, { status: 302, headers })
+  } catch (err) {
+    return new Response(`github sign-in error: ${err instanceof Error ? err.stack : String(err)}`, {
+      status: 502,
+    })
+  }
 }
