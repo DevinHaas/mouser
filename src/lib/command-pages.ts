@@ -4,6 +4,7 @@ export const commandPages = [
   { name: "User stats", path: "/stats", hint: "Your performance" },
   { name: "Friends", path: "/friends", hint: "Your friends" },
   { name: "Play", path: "/?play=1", hint: "Jump straight into a run" },
+  { name: "Training ground", path: "/?train=1", hint: "Row-by-row drills for muscle memory" },
   { name: "Watch intro", path: "/?intro=1", hint: "Replay the opening story" },
 ];
 

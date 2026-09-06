@@ -25,6 +25,35 @@ const GLOW = "#ff8c1e";
 /** How many viewport-heights tall the play field is — forces scrolling. */
 const LEVELS = 3;
 
+/** Training ground (`?train=1`): a fixed row-by-row layout you replay to build
+ *  muscle memory — no scrolling, no chest/terminal/refuel detours, not scored. */
+const TRAIN =
+  typeof location !== "undefined" &&
+  new URLSearchParams(location.search).has("train");
+
+/** Training grid: default shape plus the range each slider allows. Click order
+ *  always runs left-to-right along the top row, then the next, then the last.
+ *  The vertical gap is clamped at build time so the grid always fits one screen. */
+type TrainGrid = {
+  rows: number;
+  cols: number;
+  gap: number;
+  /** true → the tube you must click next is picked at random instead of running
+   *  row by row. Same fixed layout, unpredictable order. */
+  random: boolean;
+};
+const TRAIN_GRID_DEFAULT: TrainGrid = {
+  rows: 3,
+  cols: 3,
+  gap: 2.4,
+  random: false,
+};
+const TRAIN_GRID_LIMITS = {
+  rows: [1, 5],
+  cols: [1, 6],
+  gap: [1.6, 4],
+} as const;
+
 /** Half the vertical span of the play field, in world units. The camera pans
  *  between +BAND_Y and -BAND_Y as the page scrolls. */
 const BAND_Y = 4 * LEVELS;
@@ -77,6 +106,9 @@ type Tube = {
    *  so no tube can ever sit off the side of the viewport. Only the vertical
    *  axis is allowed to run off-screen — that's what the scrolling is for. */
   xFrac?: number;
+  /** Training grid only: -1..1 fraction of the safe band's half-height, top row
+   *  positive. Field maps it into the on-screen area the HUD panels leave free. */
+  yFrac?: number;
   base: THREE.Vector3;
   phase: number;
   spin: number;
@@ -85,11 +117,36 @@ type Tube = {
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
-function makeTubes(): Tube[] {
+function makeTubes(grid: TrainGrid = TRAIN_GRID_DEFAULT): Tube[] {
   const drift = () => ({
     phase: Math.random() * Math.PI * 2,
     spin: rand(0.2, 0.7) * (Math.random() < 0.5 ? -1 : 1),
   });
+
+  if (TRAIN) {
+    const { rows, cols, gap } = grid;
+    // One "closeness" knob drives both axes as a fraction of the safe area the
+    // HUD panels leave free: tight → tubes cluster near centre; loose → they
+    // fan out to fill it. Field does the pixel placement (see `safe`).
+    const u = THREE.MathUtils.clamp((gap - 1.6) / 2.4, 0, 1);
+    const spreadX = 0.14 + u * 0.72;
+    const spreadY = 0.24 + u * 0.72;
+    const out: Tube[] = [];
+    let id = 0;
+    for (let r = 0; r < rows; r++) {
+      const yf = rows === 1 ? 0 : (1 - (2 * r) / (rows - 1)) * spreadY;
+      for (let c = 0; c < cols; c++)
+        out.push({
+          id: id++,
+          xFrac: cols === 1 ? 0 : ((c / (cols - 1)) * 2 - 1) * spreadX,
+          yFrac: yf,
+          base: new THREE.Vector3(0, yf * 3.5, 0),
+          phase: 0,
+          spin: 0,
+        });
+    }
+    return out;
+  }
   // Free tubes are spread evenly top-to-bottom across LEVELS viewport-heights,
   // but the slots are shuffled before ids are handed out, so click order runs
   // up and down the field instead of straight down it.
@@ -352,12 +409,16 @@ function Field({
   activeId,
   hits,
   livePos,
+  safe,
 }: {
   tubes: Tube[];
   live: number[];
   activeId: number | null;
   hits: React.RefObject<Record<number, HTMLButtonElement | null>>;
   livePos: React.RefObject<Record<number, THREE.Vector3>>;
+  /** Training ground: px kept clear at the top (HUD) and bottom (the slider +
+   *  audio docks). The grid is laid out inside whatever band is left. */
+  safe?: React.RefObject<{ top: number; bottom: number }>;
 }) {
   const groups = useRef<Record<number, THREE.Group | null>>({});
   const spawn = useRef<number | null>(null);
@@ -379,11 +440,25 @@ function Field({
         tube.xFrac !== undefined
           ? tube.xFrac * limit
           : THREE.MathUtils.clamp(tube.base.x, -limit, limit);
-      g.position.set(
-        x + Math.sin(time * 0.4 + tube.phase) * 0.35,
-        tube.base.y + Math.cos(time * 0.32 + tube.phase) * 0.4,
-        tube.base.z,
-      );
+      // Training ground: tubes hold still so the target never moves under your
+      // cursor, and the grid is fitted into the screen band the HUD panels leave
+      // free so no tube ends up hidden behind one.
+      if (TRAIN) {
+        const band = safe?.current ?? { top: 96, bottom: 220 };
+        const top = band.top;
+        const bot = Math.max(top + 60, size.height - band.bottom);
+        const midPx = (top + bot) / 2;
+        const halfPx = (bot - top) / 2;
+        const py = midPx - (tube.yFrac ?? 0) * halfPx;
+        const worldY = (1 - (2 * py) / size.height) * VIEW_HALF_H;
+        g.position.set(x, worldY, tube.base.z);
+      } else {
+        g.position.set(
+          x + Math.sin(time * 0.4 + tube.phase) * 0.35,
+          tube.base.y + Math.cos(time * 0.32 + tube.phase) * 0.4,
+          tube.base.z,
+        );
+      }
       // Clickable tubes breathe; locked ones sit still and desaturated, so the
       // one you're allowed to hit right now reads at a glance.
       const active = tube.id === activeId;
@@ -654,21 +729,28 @@ function ArrowCue({ dir }: { dir: "up" | "down" | null }) {
  */
 function ScrollCamera({
   locked,
+  hold,
   children,
 }: {
   /** Something else is driving the camera (the terminal). Hands off entirely:
    *  the rig stops tracking too, otherwise the props parented to it would
    *  chase the camera into its own zoom. */
   locked?: boolean;
+  /** Pin the camera at this world-Y instead of following page scroll (training
+   *  ground: the whole field is one screen, so there is nothing to scroll to). */
+  hold?: number;
   children?: React.ReactNode;
 }) {
   const { camera } = useThree();
   const rig = useRef<THREE.Group>(null);
   useFrame(() => {
     if (locked) return;
-    const max = document.documentElement.scrollHeight - window.innerHeight;
-    const p = max > 0 ? THREE.MathUtils.clamp(window.scrollY / max, 0, 1) : 0;
-    const want = BAND_Y - p * 2 * BAND_Y;
+    let want = hold;
+    if (want === undefined) {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const p = max > 0 ? THREE.MathUtils.clamp(window.scrollY / max, 0, 1) : 0;
+      want = BAND_Y - p * 2 * BAND_Y;
+    }
     camera.position.y += (want - camera.position.y) * 0.12; // ease, not snap
     // R3F aims a camera created from the `camera` prop at the origin, so this
     // one sat tilted ~37° down and kept that tilt while panning: the topmost
@@ -788,15 +870,52 @@ function StartScreen({ onStart }: { onStart: () => void }) {
         </kbd>{" "}
         to start
       </p>
+
+      <a className="start-link" href="/?train=1">
+        training ground
+      </a>
     </div>
   );
 }
 
 export function MouserGame() {
-  const [tubes] = useState(makeTubes);
+  // Training-ground grid, driven by the on-screen sliders and remembered between
+  // reps. Ignored outside training (the shape never changes there).
+  const [grid, setGrid] = useState<TrainGrid>(() => {
+    try {
+      const s = localStorage.getItem("mouser:train-grid");
+      if (s) return { ...TRAIN_GRID_DEFAULT, ...JSON.parse(s) };
+    } catch {}
+    return TRAIN_GRID_DEFAULT;
+  });
+  useEffect(() => {
+    if (!TRAIN) return;
+    try {
+      localStorage.setItem("mouser:train-grid", JSON.stringify(grid));
+    } catch {}
+  }, [grid]);
+
+  const tubes = useMemo(() => makeTubes(grid), [grid]);
   const [live, setLive] = useState(() =>
     tubes.filter((t) => !t.fromChest).map((t) => t.id),
   );
+
+  // The click order. Row-by-row is just the ids in sequence; random mode
+  // shuffles them once per rep (recomputed whenever the grid changes).
+  const clickOrder = useMemo(() => {
+    const ids = tubes.map((t) => t.id);
+    if (TRAIN && grid.random)
+      for (let i = ids.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [ids[i], ids[j]] = [ids[j], ids[i]];
+      }
+    return ids;
+  }, [tubes, grid.random]);
+
+  // Px the training grid keeps clear at top (HUD) and bottom (slider + audio
+  // docks). A ref, not state — Field reads it every frame, no re-render needed.
+  const safeBand = useRef({ top: 100, bottom: 220 });
+  const trainPanel = useRef<HTMLDivElement>(null);
   const [chestOpen, setChestOpen] = useState(false);
   const [chestGone, setChestGone] = useState(false);
   const [bursts, setBursts] = useState<{ key: number; at: THREE.Vector3 }[]>(
@@ -806,9 +925,10 @@ export function MouserGame() {
   const [warn, setWarn] = useState(false);
   const [finalTime, setFinalTime] = useState<number | null>(null);
   // ponytail: PLAY AGAIN links to /?play=1 — skip the start screen on return.
-  const [started, setStarted] = useState(() =>
-    new URLSearchParams(location.search).has("play"),
-  );
+  const [started, setStarted] = useState(() => {
+    const q = new URLSearchParams(location.search);
+    return q.has("play") || q.has("train");
+  });
   const [paused, setPaused] = useState(false);
   // Story panels between START and level 1 — shown until the player has seen
   // them once, and re-openable only via the ⌘K command bar (/?intro=1).
@@ -818,13 +938,15 @@ export function MouserGame() {
   // Terminal: `camLocked` is camera ownership (held across both zooms),
   // `terminalDone` is the level gate.
   const [camLocked, setCamLocked] = useState(false);
-  const [terminalDone, setTerminalDone] = useState(false);
+  // Training ground skips the terminal and refuel steps entirely — their gates
+  // start satisfied so the chain is nothing but the tube grid.
+  const [terminalDone, setTerminalDone] = useState(TRAIN);
   // Refuel step: `refuelAt` is the viewport point the panel hangs off (null =
   // shut), `fuelDone` is the level gate.
   const [refuelAt, setRefuelAt] = useState<{ x: number; y: number } | null>(
     null,
   );
-  const [fuelDone, setFuelDone] = useState(false);
+  const [fuelDone, setFuelDone] = useState(TRAIN);
   const hits = useRef<Record<number, HTMLButtonElement | null>>({});
   const chestHit = useRef<HTMLButtonElement | null>(null);
   const livePos = useRef<Record<number, THREE.Vector3>>({});
@@ -845,17 +967,56 @@ export function MouserGame() {
   const [collected, setCollected] = useState(0);
   const done = finalTime !== null;
 
-  useEffect(() => {
-    if (collected >= TARGET) setFinalTime(performance.now() - start.current);
-  }, [collected]);
+  // Training grids can be any size; a normal run is always TARGET tubes.
+  const target = TRAIN ? grid.rows * grid.cols : TARGET;
 
-  // Lowest-id live tube — the one the player must click next. Chest tubes are
-  // part of the same chain; their ids sit above every free tube, so they come
-  // last and are collected one at a time in arc order.
-  const nextRequiredId = useMemo(
-    () => (live.length ? Math.min(...live) : null),
-    [live],
-  );
+  useEffect(() => {
+    if (collected >= target) setFinalTime(performance.now() - start.current);
+  }, [collected, target]);
+
+  // Changing the training sliders relays the field out — start the rep fresh.
+  useEffect(() => {
+    if (!TRAIN) return;
+    setLive(tubes.map((t) => t.id));
+    setCollected(0);
+    setBursts([]);
+    setFinalTime(null);
+    start.current = performance.now();
+    marks.current = [];
+  }, [tubes]);
+
+  // Keep the grid's clear band in sync with where the HUD docks actually sit.
+  // Measured, not hard-coded, so it survives font scaling and the mobile layout.
+  useEffect(() => {
+    if (!TRAIN || paused) return;
+    const measure = () => {
+      const vh = window.innerHeight;
+      const tops = [
+        trainPanel.current?.getBoundingClientRect().top,
+        document.querySelector(".music-dock")?.getBoundingClientRect().top,
+      ].filter((n): n is number => typeof n === "number" && n > 0);
+      safeBand.current = {
+        top: 100,
+        bottom: tops.length ? Math.min(vh * 0.5, vh - Math.min(...tops) + 16) : 200,
+      };
+    };
+    measure();
+    const raf = requestAnimationFrame(measure); // after the panel has laid out
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", measure);
+    };
+  }, [paused, grid]);
+
+  // The tube the player must click next. Normally the lowest-id live tube (chest
+  // tubes' ids sit above every free tube, so they come last, one at a time). In
+  // training it's the first still-live id in `clickOrder`.
+  const nextRequiredId = useMemo(() => {
+    if (!live.length) return null;
+    if (TRAIN) return clickOrder.find((id) => live.includes(id)) ?? null;
+    return Math.min(...live);
+  }, [live, clickOrder]);
 
   // The chest is the next step once every free tube is gone — that's when it
   // gets the ring. It vanishes on open, taking the ring with it, and the
@@ -902,7 +1063,7 @@ export function MouserGame() {
   // up, below it → scroll down, inside it → no arrow. Recomputed on scroll only.
   const [scrollHint, setScrollHint] = useState<"up" | "down" | null>(null);
   useEffect(() => {
-    if (!started || done || targetY === null) {
+    if (!started || done || targetY === null || TRAIN) {
       setScrollHint(null);
       return;
     }
@@ -1017,15 +1178,21 @@ export function MouserGame() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // ponytail: abort just reloads to the start screen instead of hand-resetting
-  // every piece of run state — simplest way back to a clean slate.
-  const abortGame = () => location.reload();
+  // ponytail: abort goes to a bare "/" instead of hand-resetting every piece of
+  // run state — simplest way back to the start screen. Reloading in place would
+  // keep ?play / ?train and drop the player straight back into a run.
+  const abortGame = () => {
+    location.href = "/";
+  };
 
   // Fires once a run is finished: saves it when logged in, then jumps straight
   // to the leaderboard. ponytail: logged-out runs just go unsaved, no endcard
   // detour for a login prompt — add one back if that flow is needed.
   useEffect(() => {
     if (finalTime === null) return;
+    // Training ground is deterministic practice — not ranked, not submitted.
+    // Enter restarts it (see the keydown effect below).
+    if (TRAIN) return;
     actions
       .submitRun({
         timeMs: Math.round(finalTime),
@@ -1038,6 +1205,16 @@ export function MouserGame() {
         location.href = "/leaderboard";
       });
   }, [finalTime, cheats]);
+
+  // Training ground: Enter on the endcard reloads for another rep.
+  useEffect(() => {
+    if (!TRAIN || !done) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") location.reload();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [done]);
 
   const flagMouse = (e: React.MouseEvent) => {
     if (!wasMouse(e)) return;
@@ -1075,7 +1252,10 @@ export function MouserGame() {
       <TurnstileGate onToken={(t) => (botToken.current = t)} />
       {/* Tall enough to force scrolling: tubes are spread across LEVELS
           viewport-heights, so this and the canvas below both need the room. */}
-      <div className="game-area" style={{ height: `${LEVELS * 100}vh` }}>
+      <div
+        className="game-area"
+        style={{ height: TRAIN ? "100vh" : `${LEVELS * 100}vh` }}
+      >
         <Canvas
           className="game-canvas"
           style={{
@@ -1091,7 +1271,7 @@ export function MouserGame() {
           {/* ponytail: no fog — it started at 14 units and the starfield lives at
               60-140, so every star was fogged out to background black. */}
           <ambientLight intensity={1.1} />
-          <ScrollCamera locked={camLocked}>
+          <ScrollCamera locked={camLocked} hold={TRAIN ? 0 : undefined}>
             <pointLight position={[8, 6, 12]} intensity={260} color="#cfe0ff" />
             <pointLight
               position={[-9, -5, 6]}
@@ -1123,20 +1303,23 @@ export function MouserGame() {
             activeId={nextRequiredId}
             hits={hits}
             livePos={livePos}
+            safe={safeBand}
           />
           {/* Outside ScrollCamera on purpose: parented to the rig it would ride
               the camera and never scroll past. Here it sits in the field on the
               tubes' z-plane. The screen faces +X in model space; TerminalScreen
               turns it to face the camera itself. */}
-          <TerminalScreen
-            position={TERMINAL_POS.toArray()}
-            size={3.4}
-            active={terminalNext}
-            length={8}
-            onLockChange={setCamLocked}
-            onSolved={() => setTerminalDone(true)}
-          />
-          {started && !chestGone && (
+          {!TRAIN && (
+            <TerminalScreen
+              position={TERMINAL_POS.toArray()}
+              size={3.4}
+              active={terminalNext}
+              length={8}
+              onLockChange={setCamLocked}
+              onSolved={() => setTerminalDone(true)}
+            />
+          )}
+          {started && !TRAIN && !chestGone && (
             <Chest
               opened={chestOpen}
               hitRef={chestHit}
@@ -1168,7 +1351,7 @@ export function MouserGame() {
                   className={`tube-hit${locked ? " tube-hit--locked" : " tube-hit--active"}`}
                   aria-label={
                     locked
-                      ? `Tube ${t.id + 1} — locked, click tubes in order`
+                      ? `Tube ${t.id + 1} — locked, collect the lit tube`
                       : `Collect tube ${t.id + 1}`
                   }
                   aria-disabled={locked}
@@ -1183,7 +1366,7 @@ export function MouserGame() {
               );
             })}
 
-        {started && !chestOpen && !done && !camLocked && (
+        {started && !TRAIN && !chestOpen && !done && !camLocked && (
           <button
             type="button"
             className={`tube-hit chest-hit${chestNext ? " tube-hit--active" : " tube-hit--locked"}`}
@@ -1205,7 +1388,7 @@ export function MouserGame() {
       <div className="hud">
         <div className="hud-bar">
           <span>
-            TUBES {collected}/{TARGET}
+            TUBES {collected}/{target}
           </span>
           <span ref={clock}>0:00.00</span>
         </div>
@@ -1248,6 +1431,53 @@ export function MouserGame() {
           </p>
         )}
 
+        {TRAIN && started && !paused && (
+          <div className="train-panel" ref={trainPanel}>
+            <h2>TRAINING GROUND</h2>
+            <button
+              type="button"
+              className="train-toggle"
+              role="switch"
+              aria-checked={grid.random}
+              onClick={() => setGrid((g) => ({ ...g, random: !g.random }))}
+            >
+              <span>ORDER</span>
+              <span className="train-toggle-val">
+                {grid.random ? "RANDOM" : "ROW BY ROW"}
+              </span>
+            </button>
+            {(
+              [
+                ["rows", "ROWS"],
+                ["cols", "COLUMNS"],
+                ["gap", "SPACING"],
+              ] as const
+            ).map(([key, label]) => {
+              const [min, max] = TRAIN_GRID_LIMITS[key];
+              return (
+                <label key={key} className="train-slider">
+                  <span className="row">
+                    <span>{label}</span>
+                    <span>
+                      {key === "gap" ? grid.gap.toFixed(1) : grid[key]}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={key === "gap" ? 0.1 : 1}
+                    value={grid[key]}
+                    onChange={(e) =>
+                      setGrid((g) => ({ ...g, [key]: Number(e.target.value) }))
+                    }
+                  />
+                </label>
+              );
+            })}
+          </div>
+        )}
+
         {paused && (
           <div className="pause-overlay">
             <div className="pause-title">PAUSED</div>
@@ -1281,7 +1511,9 @@ export function MouserGame() {
         {done && (
           <div className="endcard">
             <div className="time">{fmt(finalTime!)}</div>
-            <div className="endcard-sub">TO THE LEADERBOARD…</div>
+            <div className="endcard-sub">
+              {TRAIN ? "TRAINING — ↵ TO GO AGAIN" : "TO THE LEADERBOARD…"}
+            </div>
           </div>
         )}
       </div>
