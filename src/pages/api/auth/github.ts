@@ -13,6 +13,8 @@ export const GET: APIRoute = async ({ request, url }) => {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
+      // better-auth runs a CSRF origin check on POST; this call is same-origin.
+      origin: url.origin,
       cookie: request.headers.get('cookie') ?? '',
     },
     body: JSON.stringify({ provider: 'github', callbackURL: next }),
