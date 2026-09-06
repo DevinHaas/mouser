@@ -8,6 +8,11 @@ export const auth = betterAuth({
   baseURL: import.meta.env.BETTER_AUTH_URL,
   database: drizzleAdapter(db, { provider: 'pg', schema }),
   emailAndPassword: { enabled: true },
+  // Cloudflare fronts the app; without this, rate limiting can't see the real
+  // client IP and drops every unauthenticated caller into one shared bucket.
+  advanced: {
+    ipAddress: { ipAddressHeaders: ['cf-connecting-ip', 'x-forwarded-for'] },
+  },
   user: {
     additionalFields: {
       mouselessTool: { type: 'string', required: false, input: true },

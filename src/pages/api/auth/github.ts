@@ -9,32 +9,21 @@ export const prerender = false
 // callback without a `state`. A genuine anchor -> 302 hop sidesteps that.
 export const GET: APIRoute = async ({ request, url }) => {
   const next = url.searchParams.get('next') ?? '/'
-  try {
-    const signIn = new Request(`${url.origin}/api/auth/sign-in/social`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: url.origin,
-        cookie: request.headers.get('cookie') ?? '',
-      },
-      body: JSON.stringify({ provider: 'github', callbackURL: next }),
-    })
+  const res = await auth.api.signInSocial({
+    body: { provider: 'github', callbackURL: next },
+    headers: request.headers,
+    asResponse: true,
+  })
 
-    const res = await auth.handler(signIn)
-    const data = (await res.clone().json().catch(() => null)) as { url?: string } | null
-    if (!data?.url) {
-      return new Response(`github sign-in failed: ${res.status} ${await res.text()}`, { status: 502 })
-    }
-
-    // Carry the state cookie(s) better-auth set, swap the 200+body for a 302.
-    const headers = new Headers(res.headers)
-    headers.set('location', data.url)
-    headers.delete('content-type')
-    headers.delete('content-length')
-    return new Response(null, { status: 302, headers })
-  } catch (err) {
-    return new Response(`github sign-in error: ${err instanceof Error ? err.stack : String(err)}`, {
-      status: 502,
-    })
+  const location = res.headers.get('location')
+  if (!location) {
+    return new Response(`github sign-in failed: ${res.status} ${await res.text()}`, { status: 502 })
   }
+
+  // better-auth already put the state cookie on `res`; swap 200+body for a 302.
+  const headers = new Headers(res.headers)
+  headers.set('location', location)
+  headers.delete('content-type')
+  headers.delete('content-length')
+  return new Response(null, { status: 302, headers })
 }
