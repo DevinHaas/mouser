@@ -63,12 +63,16 @@ export function TurnstileGate({ onToken }: { onToken: (t: string | null) => void
         id = window.turnstile.render(box.current, {
           sitekey: SITE_KEY,
           appearance: 'interaction-only',
-          callback: (t: string) => cb.current(t),
+          callback: (t: string) => {
+            cb.current(t)
+            box.current?.setAttribute('hidden', '')
+          },
           'error-callback': () => cb.current(null),
           // Tokens die after ~5 minutes; a slow run would submit an expired
           // one. Drop it and solve again so the token is always fresh.
           'expired-callback': () => {
             cb.current(null)
+            box.current?.removeAttribute('hidden')
             if (id) window.turnstile?.reset(id)
           },
         })

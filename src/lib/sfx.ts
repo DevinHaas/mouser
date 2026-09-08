@@ -195,11 +195,11 @@ export function setNarratorVolume(v: number) {
 export function musicBus() {
   if (!bus) {
     const ac = (ctx ??= new AudioContext());
-    const gain = new GainNode(ac, { gain: getMusicVolume() });
-    const analyser = new AnalyserNode(ac, {
-      fftSize: 128,
-      smoothingTimeConstant: 0.75,
-    });
+    const gain = ac.createGain();
+    gain.gain.value = getMusicVolume();
+    const analyser = ac.createAnalyser();
+    analyser.fftSize = 128;
+    analyser.smoothingTimeConstant = 0.75;
     gain.connect(analyser).connect(ac.destination);
     bus = { ac, gain, analyser };
   }
@@ -214,7 +214,7 @@ export function attachMusic(el: HTMLMediaElement) {
   const { ac, gain } = musicBus();
   if (!routed.has(el)) {
     routed.add(el);
-    new MediaElementAudioSourceNode(ac, { mediaElement: el }).connect(gain);
+    ac.createMediaElementSource(el).connect(gain);
   }
   ac.resume().catch(() => {});
 }
