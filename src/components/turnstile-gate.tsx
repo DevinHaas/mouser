@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { captureError } from '@/lib/analytics'
 
 const SITE_KEY = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY as string | undefined
 const API = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
@@ -67,7 +68,12 @@ export function TurnstileGate({ onToken }: { onToken: (t: string | null) => void
             cb.current(t)
             box.current?.setAttribute('hidden', '')
           },
-          'error-callback': () => cb.current(null),
+          'error-callback': () => {
+            captureError(new Error('Turnstile challenge failed'), {
+              operation: 'turnstile_challenge',
+            })
+            cb.current(null)
+          },
           // Tokens die after ~5 minutes; a slow run would submit an expired
           // one. Drop it and solve again so the token is always fresh.
           'expired-callback': () => {
@@ -77,7 +83,10 @@ export function TurnstileGate({ onToken }: { onToken: (t: string | null) => void
           },
         })
       })
-      .catch(() => cb.current(null))
+      .catch((error) => {
+        captureError(error, { operation: 'turnstile_load' })
+        cb.current(null)
+      })
 
     return () => {
       dead = true

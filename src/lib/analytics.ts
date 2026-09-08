@@ -1,5 +1,5 @@
 /** Privacy-first PostHog: localStorage only (no cookies -> no cookie banner),
- *  no autocapture, no session recording, anonymous events.
+ *  no interaction autocapture, no session recording, anonymous events.
  *
  *  Doubles as the store for "has this visitor seen the intro?" — a persisted
  *  super property (`intro_seen`) that rides along on every event and is read
@@ -19,6 +19,11 @@ export function initAnalytics() {
     api_host: import.meta.env.PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
     persistence: "localStorage",
     autocapture: false,
+    capture_exceptions: {
+      capture_unhandled_errors: true,
+      capture_unhandled_rejections: true,
+      capture_console_errors: false,
+    },
     capture_pageview: true,
     disable_session_recording: true,
     disable_surveys: true,
@@ -62,4 +67,16 @@ export function markIntroSeen() {
 
 export function trackIntroReplay() {
   if (started) posthog.capture("intro_replayed");
+}
+
+type ErrorContext = {
+  operation: string;
+  [key: string]: string | number | boolean | null | undefined;
+};
+
+/** Keeps caught failures visible locally and in PostHog error tracking. */
+export function captureError(error: unknown, context: ErrorContext) {
+  const exception = error instanceof Error ? error : new Error(String(error));
+  console.error(`[mouser] ${context.operation}`, exception, context);
+  if (started) posthog.captureException(exception, context);
 }

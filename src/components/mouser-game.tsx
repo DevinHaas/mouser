@@ -13,7 +13,12 @@ import { TerminalScreen } from "./terminal-screen";
 import { RefuelPanel } from "./refuel-panel";
 import { IntroSequence } from "./intro-sequence";
 import { TurnstileGate } from "./turnstile-gate";
-import { markIntroSeen, shouldShowIntro, trackIntroReplay } from "@/lib/analytics";
+import {
+  captureError,
+  markIntroSeen,
+  shouldShowIntro,
+  trackIntroReplay,
+} from "@/lib/analytics";
 
 const TARGET = 10;
 const MODEL = "/capsule.glb";
@@ -1198,7 +1203,13 @@ export function MouserGame() {
         marks: marks.current.map(Math.round),
         token: botToken.current,
       })
-      .catch(() => {})
+      .catch((error) =>
+        captureError(error, {
+          operation: "submit_run",
+          time_ms: Math.round(finalTime),
+          cheats,
+        }),
+      )
       .then(() => {
         location.href = "/leaderboard";
       });
