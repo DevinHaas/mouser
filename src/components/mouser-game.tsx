@@ -13,7 +13,7 @@ import { TerminalScreen } from "./terminal-screen";
 import { RefuelPanel } from "./refuel-panel";
 import { IntroSequence } from "./intro-sequence";
 import { TurnstileGate } from "./turnstile-gate";
-import { hasSeenIntro, markIntroSeen, trackIntroReplay } from "@/lib/analytics";
+import { markIntroSeen, shouldShowIntro, trackIntroReplay } from "@/lib/analytics";
 
 const TARGET = 10;
 const MODEL = "/capsule.glb";
@@ -930,11 +930,9 @@ export function MouserGame() {
     return q.has("play") || q.has("train");
   });
   const [paused, setPaused] = useState(false);
-  // Story panels between START and level 1 — shown until the player has seen
-  // them once, and re-openable only via the ⌘K command bar (/?intro=1).
-  const [intro, setIntro] = useState(() =>
-    new URLSearchParams(location.search).has("intro"),
-  );
+  // Story panels open on the first visit and remain replayable via the ⌘K
+  // command bar (/?intro=1).
+  const [intro, setIntro] = useState(() => shouldShowIntro(location.search));
   // Terminal: `camLocked` is camera ownership (held across both zooms),
   // `terminalDone` is the level gate.
   const [camLocked, setCamLocked] = useState(false);
@@ -1097,7 +1095,7 @@ export function MouserGame() {
   }, []);
 
   const beginGame = () => {
-    if (!hasSeenIntro() && !new URLSearchParams(location.search).has("play")) {
+    if (shouldShowIntro(location.search)) {
       setIntro(true);
       return;
     }

@@ -43,6 +43,11 @@ export function hasSeenIntro(): boolean {
   }
 }
 
+export function shouldShowIntro(search: string, seen = hasSeenIntro()): boolean {
+  const q = new URLSearchParams(search);
+  return q.has("intro") || (!seen && !q.has("play") && !q.has("train"));
+}
+
 export function markIntroSeen() {
   try {
     localStorage.setItem(LEGACY_KEY, "1");
