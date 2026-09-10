@@ -32,6 +32,11 @@ const posthog = key
     })
   : null
 
+export function captureServerInfo(message: string, properties: Properties) {
+  console.info(`[mouser] ${message}`, properties)
+  logger.emit({ severityText: 'INFO', body: message, attributes: properties })
+}
+
 export function captureServerError(error: unknown, properties: Properties) {
   const exception = error instanceof Error ? error : new Error(String(error))
   console.error(`[mouser] ${properties.operation ?? 'server_error'}`, exception, properties)

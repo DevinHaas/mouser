@@ -1110,6 +1110,17 @@ export function MouserGame() {
     return playMusic("/music/game.mp3");
   }, [started, done]);
 
+  useEffect(() => {
+    if (started) {
+      void actions.logGame({
+        event: "game_started",
+        mode: TRAIN ? "training" : "ranked",
+        elapsedMs: 0,
+        cheats: 0,
+      });
+    }
+  }, [started]);
+
   const beginGame = () => {
     if (shouldShowIntro(location.search)) {
       setIntro(true);
@@ -1204,6 +1215,12 @@ export function MouserGame() {
   // detour for a login prompt — add one back if that flow is needed.
   useEffect(() => {
     if (finalTime === null) return;
+    void actions.logGame({
+      event: "game_finished",
+      mode: TRAIN ? "training" : "ranked",
+      elapsedMs: Math.round(finalTime),
+      cheats,
+    });
     // Training ground is deterministic practice — not ranked, not submitted.
     // Enter restarts it (see the keydown effect below).
     if (TRAIN) return;

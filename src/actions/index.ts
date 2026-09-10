@@ -7,9 +7,21 @@ import { and, asc, count, eq, lt, min } from 'drizzle-orm'
 import { padTop3 } from '@/lib/mock-leaderboard'
 import { bestRunPerUser } from '@/lib/leaderboard-query'
 import { paceFault, turnstileOk } from '@/lib/anti-bot'
-import { captureServerError } from '@/lib/analytics.server'
+import { captureServerError, captureServerInfo } from '@/lib/analytics.server'
 
 export const server = {
+  logGame: defineAction({
+    input: z.object({
+      event: z.enum(['game_started', 'game_finished']),
+      mode: z.enum(['ranked', 'training']),
+      elapsedMs: z.number().int().min(0),
+      cheats: z.number().int().min(0),
+    }),
+    handler: ({ event, mode, elapsedMs, cheats }) => {
+      captureServerInfo(event, { mode, elapsed_ms: elapsedMs, cheats })
+    },
+  }),
+
   /** Podium rows for the start-screen leaderboard dock. */
   topThree: defineAction({
     handler: async () => {
