@@ -89,12 +89,18 @@ export const server = {
       })()
 
       if (!session) return { saved: false, preview, rejected: null }
-      await db.insert(runs).values({
-        userId: session.user.id,
-        timeMs,
-        cheats,
-        mouselessTool: session.user.mouselessTool ?? null,
-      })
+      try {
+        await db.insert(runs).values({
+          userId: session.user.id,
+          timeMs,
+          cheats,
+          mouselessTool: session.user.mouselessTool ?? null,
+        })
+      } catch (error) {
+        const cause = error instanceof Error ? error.cause ?? error : error
+        captureServerError(cause, { operation: '[DEBUG-7c2f] submit_run_insert' })
+        throw error
+      }
       return { saved: true, preview, rejected: null }
     },
   }),
