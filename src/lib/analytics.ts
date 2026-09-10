@@ -14,23 +14,27 @@ let started = false;
 
 export function initAnalytics() {
   if (started || typeof window === "undefined" || !KEY) return;
-  started = true;
-  posthog.init(KEY, {
-    api_host: import.meta.env.PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
-    persistence: "localStorage",
-    autocapture: false,
-    capture_exceptions: {
-      capture_unhandled_errors: true,
-      capture_unhandled_rejections: true,
-      capture_console_errors: false,
-    },
-    capture_pageview: true,
-    disable_session_recording: true,
-    disable_surveys: true,
-    cross_subdomain_cookie: false,
-    respect_dnt: true,
-    person_profiles: "identified_only",
-  });
+  try {
+    posthog.init(KEY, {
+      api_host: import.meta.env.PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
+      persistence: "localStorage",
+      autocapture: false,
+      capture_exceptions: {
+        capture_unhandled_errors: true,
+        capture_unhandled_rejections: true,
+        capture_console_errors: false,
+      },
+      capture_pageview: true,
+      disable_session_recording: true,
+      disable_surveys: true,
+      cross_subdomain_cookie: false,
+      respect_dnt: true,
+      person_profiles: "identified_only",
+    });
+    started = true;
+  } catch (error) {
+    console.error("[mouser] analytics_init", error);
+  }
 }
 
 // Fire on import too — the game island may read intro state before the layout
@@ -67,6 +71,15 @@ export function markIntroSeen() {
 
 export function trackIntroReplay() {
   if (started) posthog.capture("intro_replayed");
+}
+
+type EventProperties = Record<
+  string,
+  string | number | boolean | null | undefined
+>;
+
+export function trackEvent(event: string, properties?: EventProperties) {
+  if (started) posthog.capture(event, properties);
 }
 
 type ErrorContext = {

@@ -274,7 +274,6 @@ body {
 .tube-hit {
   position: fixed;
   z-index: 4;
-  transform: translate(-50%, -50%);
   border: 2px solid transparent;
   border-radius: 50%;
   background: transparent;
@@ -318,20 +317,37 @@ body {
 }
 
 /* Scroll cue: plain fixed DOM, so nothing has to be reprojected per frame.
-   Its own small canvas — it is deliberately not part of the play field. */
+   Its small canvas renders once; CSS handles the bob. */
 .arrow-cue {
   position: fixed;
   left: 50%;
-  width: 110px;
-  height: 110px;
-  margin-left: -55px;
+  width: 144px;
+  height: 144px;
+  margin-left: -72px;
   z-index: 6;
   pointer-events: none;
-  filter: drop-shadow(0 0 14px var(--neon-glow));
+  filter:
+    drop-shadow(0 4px 10px #03040c)
+    drop-shadow(0 0 22px var(--neon));
+}
+
+.arrow-cue-label {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  transform: translateX(-50%);
+  color: var(--t-sticker);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  white-space: nowrap;
+  text-shadow:
+    0 2px 8px #03040c,
+    0 0 10px var(--neon);
 }
 
 .arrow-cue--up {
-  top: 56px;
+  top: 48px;
   animation: cue-bob-up 1.6s ease-in-out infinite;
 }
 

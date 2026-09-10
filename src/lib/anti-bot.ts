@@ -12,6 +12,8 @@
  * is a server-authoritative game loop — build that when the board is worth it.
  */
 
+import { captureServerError } from '@/lib/analytics.server'
+
 /** One mark per tube. Must match TARGET in mouser-game.tsx. */
 export const MARK_COUNT = 10
 
@@ -78,7 +80,8 @@ export async function turnstileOk(
     if (!r.ok) return false
     const body = (await r.json()) as { success?: boolean }
     return body.success === true
-  } catch {
+  } catch (error) {
+    captureServerError(error, { operation: 'turnstile_verify' })
     return false
   }
 }

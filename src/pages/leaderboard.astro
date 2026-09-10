@@ -7,11 +7,15 @@ import { bestRunPerUser, boardSize } from '@/lib/leaderboard-query'
 import { paging, PAGE_SIZE, PODIUM } from '@/lib/paging'
 import { fmtTime } from '@/lib/format'
 import { MOUSELESS_TOOL_BY_ID } from '@/lib/mouseless-tools'
+import { captureServerError } from '@/lib/analytics.server'
 
 const board = bestRunPerUser
 
 // ponytail: the board is cosmetic — a DB hiccup shows mock rows, not a 500.
-const totals = await boardSize().catch(() => [{ n: 0 }])
+const totals = await boardSize().catch((error) => {
+  captureServerError(error, { operation: 'load_leaderboard_size' })
+  return [{ n: 0 }]
+})
 
 const { page, pages, offset, firstRank } = paging(
   totals[0]?.n ?? 0,
@@ -19,8 +23,14 @@ const { page, pages, offset, firstRank } = paging(
 )
 
 const [top3, rest] = await Promise.all([
-  board().limit(PODIUM).catch(() => []),
-  board().limit(PAGE_SIZE).offset(offset).catch(() => []),
+  board().limit(PODIUM).catch((error) => {
+    captureServerError(error, { operation: 'load_leaderboard_podium' })
+    return []
+  }),
+  board().limit(PAGE_SIZE).offset(offset).catch((error) => {
+    captureServerError(error, { operation: 'load_leaderboard_page', page })
+    return []
+  }),
 ])
 
 const podium = padTop3(top3)

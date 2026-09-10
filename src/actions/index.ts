@@ -7,6 +7,7 @@ import { and, asc, count, eq, lt, min } from 'drizzle-orm'
 import { padTop3 } from '@/lib/mock-leaderboard'
 import { bestRunPerUser } from '@/lib/leaderboard-query'
 import { paceFault, turnstileOk } from '@/lib/anti-bot'
+import { captureServerError } from '@/lib/analytics.server'
 
 export const server = {
   /** Podium rows for the start-screen leaderboard dock. */
@@ -14,7 +15,10 @@ export const server = {
     handler: async () => {
       const rows = await bestRunPerUser()
         .limit(3)
-        .catch(() => [])
+        .catch((error) => {
+          captureServerError(error, { operation: 'load_top_three' })
+          return []
+        })
       return padTop3(rows)
     },
   }),

@@ -561,5 +561,3 @@ export function TerminalScreen({
     </group>
   );
 }
-
-useGLTF.preload(MODEL);

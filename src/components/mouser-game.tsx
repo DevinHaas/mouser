@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Clone, Stars, useAnimations, useGLTF } from "@react-three/drei";
+import {
+  Clone,
+  PerformanceMonitor,
+  Stars,
+  useAnimations,
+  useGLTF,
+} from "@react-three/drei";
 import * as THREE from "three";
 import { actions } from "astro:actions";
 import { authClient } from "@/lib/auth-client";
 import { makeHoverSfx, playMusic, playOnce, playRadio } from "@/lib/sfx";
+import { terminalIsDue } from "@/lib/game-order";
 import { MusicViz } from "./music-viz";
 import { LeaderboardDock } from "./leaderboard-dock";
 import { AuthWidget } from "./auth-widget";
@@ -17,13 +24,14 @@ import {
   captureError,
   markIntroSeen,
   shouldShowIntro,
+  trackEvent,
   trackIntroReplay,
 } from "@/lib/analytics";
 
 const TARGET = 10;
 const MODEL = "/capsule.glb";
 const CHEST = "/chest_animated.glb";
-const ARROW = "/up.glb";
+const ARROW = "/up.v2.glb";
 const ACCENT = "#B03422";
 const GLOW = "#ff8c1e";
 
@@ -62,6 +70,7 @@ const TRAIN_GRID_LIMITS = {
 /** Half the vertical span of the play field, in world units. The camera pans
  *  between +BAND_Y and -BAND_Y as the page scrolls. */
 const BAND_Y = 4 * LEVELS;
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 /* A long lens far back is nearly orthographic: every tube is seen square-on
    instead of from below/above like a wide lens up close does. */
@@ -71,11 +80,17 @@ const CAM_FOV = 40;
 /** Half the world-height the camera can see at the play plane. */
 const VIEW_HALF_H = Math.tan((CAM_FOV * Math.PI) / 360) * CAM_Z;
 
-/** Where the chest sits (bottom of the field), and the arc its tubes settle into.
- *  x is randomised per round (a round is one page load — PLAY AGAIN reloads). */
+const CHEST_ARC = [
+  [-1.8, 1.9],
+  [0, 2.6],
+  [1.8, 1.9],
+] as const;
+const FREE_TUBE_COUNT = TARGET - CHEST_ARC.length;
+
+/** Chest and terminal positions are randomised independently per round. */
 const CHEST_POS = new THREE.Vector3(
   (Math.random() - 0.5) * 7,
-  -BAND_Y + 1.5,
+  rand(-BAND_Y + 2, BAND_Y - 2),
   0,
 );
 
@@ -87,14 +102,11 @@ const CHEST_POS = new THREE.Vector3(
 // chest so its tube arc can't overlap the terminal body.
 const TERMINAL_POS = new THREE.Vector3(
   (CHEST_POS.x > 0 ? -1 : 1) * (3.8 + Math.random() * 1.8),
-  -9.2 + (Math.random() - 0.5) * 2.6,
+  rand(-BAND_Y + 2, BAND_Y - 2),
   0,
 );
-const CHEST_ARC = [
-  [-1.8, 1.9],
-  [0, 2.6],
-  [1.8, 1.9],
-] as const;
+/** Number of free tubes collected before the terminal becomes the next step. */
+const TERMINAL_AFTER = Math.floor(Math.random() * (FREE_TUBE_COUNT + 1));
 
 /** Chest timeline, seconds from the click. The GLB "Open" clip is 1.67s. */
 const T_RELEASE = 1.5;
@@ -119,8 +131,6 @@ type Tube = {
   spin: number;
   fromChest?: boolean;
 };
-
-const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 function makeTubes(grid: TrainGrid = TRAIN_GRID_DEFAULT): Tube[] {
   const drift = () => ({
@@ -155,7 +165,7 @@ function makeTubes(grid: TrainGrid = TRAIN_GRID_DEFAULT): Tube[] {
   // Free tubes are spread evenly top-to-bottom across LEVELS viewport-heights,
   // but the slots are shuffled before ids are handed out, so click order runs
   // up and down the field instead of straight down it.
-  const freeCount = TARGET - CHEST_ARC.length;
+  const freeCount = FREE_TUBE_COUNT;
   const slots = Array.from({ length: freeCount }, (_, i) => {
     const t = freeCount > 1 ? i / (freeCount - 1) : 0.5;
     return BAND_Y - t * (2 * BAND_Y) + rand(-2, 2);
@@ -384,6 +394,8 @@ function Burst({ at }: { at: THREE.Vector3 }) {
 }
 
 /** Projects a world position onto the HTML hit-button that shadows it. */
+const projectedPosition = new THREE.Vector3();
+
 function placeButton(
   btn: HTMLButtonElement,
   at: THREE.Vector3,
@@ -391,14 +403,13 @@ function placeButton(
   size: { width: number; height: number },
   worldSize: number,
 ) {
-  const v = new THREE.Vector3().copy(at).project(camera);
+  const v = projectedPosition.copy(at).project(camera);
   const fov = (camera as THREE.PerspectiveCamera).fov;
   const fovScale = size.height / (2 * Math.tan((fov * Math.PI) / 360));
   const px = Math.round(
     (fovScale * worldSize) / camera.position.distanceTo(at),
   );
-  btn.style.left = `${(v.x * 0.5 + 0.5) * size.width}px`;
-  btn.style.top = `${(-v.y * 0.5 + 0.5) * size.height}px`;
+  btn.style.transform = `translate3d(${(v.x * 0.5 + 0.5) * size.width}px, ${(-v.y * 0.5 + 0.5) * size.height}px, 0) translate(-50%, -50%)`;
   btn.style.width = `${px}px`;
   btn.style.height = `${px}px`;
 }
@@ -477,7 +488,7 @@ function Field({
         scale *= ease;
       }
       g.scale.setScalar(scale);
-      livePos.current[tube.id] = g.position.clone();
+      (livePos.current[tube.id] ??= new THREE.Vector3()).copy(g.position);
       // In-plane rock only. Free tumbling on x/y pitched tubes toward and away
       // from the camera, which read as the whole field being off-axis.
       g.rotation.set(
@@ -689,18 +700,12 @@ function Chest({
   );
 }
 
-/** The arrow GLB, spinning slowly, alone in its own tiny canvas. */
+/** The arrow GLB, rendered on demand in its own tiny canvas. */
 function ArrowModel({ dir }: { dir: "up" | "down" }) {
   const { scene } = useGLTF(ARROW);
-  const g = useRef<THREE.Group>(null);
-  useFrame((_, dt) => {
-    if (g.current) g.current.rotation.y += dt * 0.9;
-  });
   return (
     <group rotation={[0, 0, dir === "down" ? Math.PI : 0]}>
-      <group ref={g}>
-        <Clone object={scene} />
-      </group>
+      <Clone object={scene} />
     </group>
   );
 }
@@ -713,16 +718,24 @@ function ArrowModel({ dir }: { dir: "up" | "down" }) {
 function ArrowCue({ dir }: { dir: "up" | "down" | null }) {
   if (!dir) return null;
   return (
-    <div className={`arrow-cue arrow-cue--${dir}`} aria-hidden="true">
+    <div
+      className={`arrow-cue arrow-cue--${dir}`}
+      role="img"
+      aria-label={`Scroll ${dir}`}
+    >
       <Canvas
         camera={{ position: [0, 0, 3.2], fov: 45 }}
-        dpr={[1, 1.5]}
+        dpr={1}
+        frameloop="demand"
         gl={{ alpha: true }}
       >
         <ambientLight intensity={2} />
         <directionalLight position={[2, 3, 4]} intensity={3} />
         <ArrowModel dir={dir} />
       </Canvas>
+      <span className="arrow-cue-label" aria-hidden="true">
+        SCROLL {dir.toUpperCase()}
+      </span>
     </div>
   );
 }
@@ -839,10 +852,6 @@ function StartScreen({ onStart }: { onStart: () => void }) {
       <button
         type="button"
         className="start-btn frame-btn"
-        // ponytail: autofocus only on a cold/external load — coming back from
-        // the leaderboard's PLAY AGAIN would otherwise grab focus and fire the
-        // hover sfx unprompted.
-        autoFocus={!document.referrer.startsWith(location.origin)}
         onMouseEnter={hover.enter}
         onMouseLeave={hover.leave}
         onFocus={hover.enter}
@@ -935,6 +944,8 @@ export function MouserGame() {
     return q.has("play") || q.has("train");
   });
   const [paused, setPaused] = useState(false);
+  const maxDpr = Math.min(window.devicePixelRatio, 1.5);
+  const [dpr, setDpr] = useState(maxDpr);
   // Story panels open on the first visit and remain replayable via the ⌘K
   // command bar (/?intro=1).
   const [intro, setIntro] = useState(() => shouldShowIntro(location.search));
@@ -1021,24 +1032,30 @@ export function MouserGame() {
     return Math.min(...live);
   }, [live, clickOrder]);
 
+  const freeRemaining = tubes.filter(
+    (tube) => !tube.fromChest && live.includes(tube.id),
+  ).length;
+
   // The chest is the next step once every free tube is gone — that's when it
   // gets the ring. It vanishes on open, taking the ring with it, and the
   // highlight moves on to the tubes it released.
   const chestNext = useMemo(
-    () => fuelDone && !tubes.some((t) => !t.fromChest && live.includes(t.id)),
-    [tubes, live, fuelDone],
+    () => fuelDone && freeRemaining === 0,
+    [fuelDone, freeRemaining],
   );
 
-  // The terminal takes its turn between the last free tube and the chest.
-  // Move this one expression to re-slot it anywhere in the chain.
+  // The terminal takes a random turn among the free tubes each round.
   const terminalNext = useMemo(
     () =>
       started &&
       !done &&
       !paused &&
-      !terminalDone &&
-      !tubes.some((t) => !t.fromChest && live.includes(t.id)),
-    [started, done, paused, terminalDone, tubes, live],
+      terminalIsDue(
+        FREE_TUBE_COUNT - freeRemaining,
+        TERMINAL_AFTER,
+        terminalDone,
+      ),
+    [started, done, paused, terminalDone, freeRemaining],
   );
 
   // …and the astronaut takes his between the terminal and the chest.
@@ -1046,6 +1063,7 @@ export function MouserGame() {
     () => started && !done && !paused && terminalDone && !fuelDone,
     [started, done, paused, terminalDone, fuelDone],
   );
+  const activeTubeId = terminalNext || refuelNext ? null : nextRequiredId;
 
   // World-Y of whatever the player has to reach next: the required free tube,
   // the terminal while it holds the chest shut, or the chest itself (and the
@@ -1098,6 +1116,10 @@ export function MouserGame() {
   useEffect(() => {
     if (new URLSearchParams(location.search).has("intro")) trackIntroReplay();
   }, []);
+
+  useEffect(() => {
+    if (started) trackEvent("game_started", { mode: TRAIN ? "training" : "ranked" });
+  }, [started]);
 
   const beginGame = () => {
     if (shouldShowIntro(location.search)) {
@@ -1195,13 +1217,29 @@ export function MouserGame() {
     if (finalTime === null) return;
     // Training ground is deterministic practice — not ranked, not submitted.
     // Enter restarts it (see the keydown effect below).
-    if (TRAIN) return;
+    if (TRAIN) {
+      trackEvent("training_completed", {
+        time_ms: Math.round(finalTime),
+        cheats,
+      });
+      return;
+    }
     actions
-      .submitRun({
+      .submitRun.orThrow({
         timeMs: Math.round(finalTime),
         cheats,
         marks: marks.current.map(Math.round),
         token: botToken.current,
+      })
+      .then((result) => {
+        trackEvent("run_completed", {
+          time_ms: Math.round(finalTime),
+          cheats,
+          saved: result.saved,
+          rejected: result.rejected,
+          rank: result.preview?.rank,
+        });
+        location.href = "/leaderboard";
       })
       .catch((error) =>
         captureError(error, {
@@ -1209,10 +1247,7 @@ export function MouserGame() {
           time_ms: Math.round(finalTime),
           cheats,
         }),
-      )
-      .then(() => {
-        location.href = "/leaderboard";
-      });
+      );
   }, [finalTime, cheats]);
 
   // Training ground: Enter on the endcard reloads for another rep.
@@ -1241,10 +1276,10 @@ export function MouserGame() {
 
   const collect = (tube: Tube, e: React.MouseEvent) => {
     if (!started || done || paused || !live.includes(tube.id)) return;
-    if (tube.id !== nextRequiredId) return; // locked, out of order
+    if (tube.id !== activeTubeId) return; // locked, out of order
     marks.current.push(performance.now() - start.current);
     flagMouse(e);
-    const at = livePos.current[tube.id] ?? tube.base.clone();
+    const at = (livePos.current[tube.id] ?? tube.base).clone();
     playOnce(
       Math.random() < 0.5 ? "/music/explosion.mp3" : "/music/explosion2.mp3",
       0.25,
@@ -1274,8 +1309,13 @@ export function MouserGame() {
             height: "100vh",
           }}
           camera={{ position: [0, BAND_Y, CAM_Z], fov: CAM_FOV }}
-          dpr={[1, 1.75]}
+          dpr={dpr}
         >
+          <PerformanceMonitor
+            onIncline={() => setDpr(maxDpr)}
+            onDecline={() => setDpr(1)}
+            onFallback={() => setDpr(1)}
+          />
           <color attach="background" args={["#03040c"]} />
           {/* ponytail: no fog — it started at 14 units and the starfield lives at
               60-140, so every star was fogged out to background black. */}
@@ -1309,7 +1349,7 @@ export function MouserGame() {
           <Field
             tubes={tubes}
             live={live}
-            activeId={nextRequiredId}
+            activeId={activeTubeId}
             hits={hits}
             livePos={livePos}
             safe={safeBand}
@@ -1318,7 +1358,7 @@ export function MouserGame() {
               the camera and never scroll past. Here it sits in the field on the
               tubes' z-plane. The screen faces +X in model space; TerminalScreen
               turns it to face the camera itself. */}
-          {!TRAIN && (
+          {started && !TRAIN && (
             <TerminalScreen
               position={TERMINAL_POS.toArray()}
               size={3.4}
@@ -1328,7 +1368,7 @@ export function MouserGame() {
               onSolved={() => setTerminalDone(true)}
             />
           )}
-          {started && !TRAIN && !chestGone && (
+          {started && terminalDone && !TRAIN && !chestGone && (
             <Chest
               opened={chestOpen}
               hitRef={chestHit}
@@ -1352,7 +1392,7 @@ export function MouserGame() {
           tubes
             .filter((t) => live.includes(t.id))
             .map((t) => {
-              const locked = t.id !== nextRequiredId;
+              const locked = t.id !== activeTubeId;
               return (
                 <button
                   key={t.id}
@@ -1360,7 +1400,9 @@ export function MouserGame() {
                   className={`tube-hit${locked ? " tube-hit--locked" : " tube-hit--active"}`}
                   aria-label={
                     locked
-                      ? `Tube ${t.id + 1} — locked, collect the lit tube`
+                      ? activeTubeId === null
+                        ? `Tube ${t.id + 1} — locked, complete the current objective`
+                        : `Tube ${t.id + 1} — locked, collect the lit tube`
                       : `Collect tube ${t.id + 1}`
                   }
                   aria-disabled={locked}
@@ -1544,5 +1586,3 @@ function fmt(ms: number) {
 }
 
 useGLTF.preload(MODEL);
-useGLTF.preload(CHEST);
-useGLTF.preload(ARROW);
