@@ -1514,7 +1514,13 @@ export function MouserGame() {
         {!started && !intro && <StartScreen onStart={beginGame} />}
 
         {intro && (
-          <IntroSequence onDone={finishIntro} onExit={() => setIntro(false)} />
+          <IntroSequence
+            onDone={finishIntro}
+            onExit={() => {
+              markIntroSeen();
+              setIntro(false);
+            }}
+          />
         )}
 
         {done && (
