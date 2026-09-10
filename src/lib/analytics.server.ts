@@ -7,22 +7,23 @@ import { PostHog } from 'posthog-node'
 
 type Properties = Record<string, string | number | boolean>
 
-const key = import.meta.env.PUBLIC_POSTHOG_KEY
+const key = import.meta.env.PUBLIC_POSTHOG_PROJECT_TOKEN ?? import.meta.env.PUBLIC_POSTHOG_KEY
 const host = import.meta.env.PUBLIC_POSTHOG_HOST ?? 'https://eu.i.posthog.com'
 
 if (key) {
   new NodeSDK({
     resource: resourceFromAttributes({ 'service.name': 'mouser' }),
-    logRecordProcessor: new BatchLogRecordProcessor(
-      new OTLPLogExporter({
+    logRecordProcessor: new BatchLogRecordProcessor({
+      exporter: new OTLPLogExporter({
         url: `${host.replace(/\/$/, '')}/i/v1/logs`,
         headers: { Authorization: `Bearer ${key}` },
       }),
-    ),
+    }),
   }).start()
 }
 
 const logger = logs.getLogger('mouser')
+if (key) logger.emit({ severityText: 'INFO', body: 'Mouser server started' })
 const posthog = key
   ? new PostHog(key, {
       host,
