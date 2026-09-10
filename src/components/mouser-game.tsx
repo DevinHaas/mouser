@@ -24,8 +24,6 @@ import {
   captureError,
   markIntroSeen,
   shouldShowIntro,
-  trackEvent,
-  trackIntroReplay,
 } from "@/lib/analytics";
 
 const TARGET = 10;
@@ -1112,15 +1110,6 @@ export function MouserGame() {
     return playMusic("/music/game.mp3");
   }, [started, done]);
 
-  // Replaying the intro from the command bar (/?intro=1) is a distinct signal.
-  useEffect(() => {
-    if (new URLSearchParams(location.search).has("intro")) trackIntroReplay();
-  }, []);
-
-  useEffect(() => {
-    if (started) trackEvent("game_started", { mode: TRAIN ? "training" : "ranked" });
-  }, [started]);
-
   const beginGame = () => {
     if (shouldShowIntro(location.search)) {
       setIntro(true);
@@ -1217,13 +1206,7 @@ export function MouserGame() {
     if (finalTime === null) return;
     // Training ground is deterministic practice — not ranked, not submitted.
     // Enter restarts it (see the keydown effect below).
-    if (TRAIN) {
-      trackEvent("training_completed", {
-        time_ms: Math.round(finalTime),
-        cheats,
-      });
-      return;
-    }
+    if (TRAIN) return;
     actions
       .submitRun.orThrow({
         timeMs: Math.round(finalTime),
@@ -1231,14 +1214,7 @@ export function MouserGame() {
         marks: marks.current.map(Math.round),
         token: botToken.current,
       })
-      .then((result) => {
-        trackEvent("run_completed", {
-          time_ms: Math.round(finalTime),
-          cheats,
-          saved: result.saved,
-          rejected: result.rejected,
-          rank: result.preview?.rank,
-        });
+      .then(() => {
         location.href = "/leaderboard";
       })
       .catch((error) =>

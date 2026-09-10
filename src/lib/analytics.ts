@@ -1,10 +1,4 @@
-/** Privacy-first PostHog: localStorage only (no cookies -> no cookie banner),
- *  no interaction autocapture, no session recording, anonymous events.
- *
- *  Doubles as the store for "has this visitor seen the intro?" — a persisted
- *  super property (`intro_seen`) that rides along on every event and is read
- *  back synchronously from localStorage on the next load. localStorage key
- *  `mouser:intro-seen` stays as a fallback for when PostHog isn't configured. */
+/** PostHog error tracking only: no product events, flags, recording, or persistence. */
 import posthog from "posthog-js";
 
 const LEGACY_KEY = "mouser:intro-seen";
@@ -17,18 +11,18 @@ export function initAnalytics() {
   try {
     posthog.init(KEY, {
       api_host: import.meta.env.PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
-      persistence: "localStorage",
+      disable_persistence: true,
       autocapture: false,
       capture_exceptions: {
         capture_unhandled_errors: true,
         capture_unhandled_rejections: true,
         capture_console_errors: false,
       },
-      capture_pageview: true,
+      capture_pageview: false,
+      advanced_disable_flags: true,
       disable_session_recording: true,
       disable_surveys: true,
       cross_subdomain_cookie: false,
-      respect_dnt: true,
       person_profiles: "identified_only",
     });
     started = true;
@@ -43,9 +37,6 @@ initAnalytics();
 
 export function hasSeenIntro(): boolean {
   try {
-    // ponytail: dev never consults PostHog — intro-seen is localStorage only
-    if (!import.meta.env.DEV && started && posthog.get_property("intro_seen"))
-      return true;
     return localStorage.getItem(LEGACY_KEY) === "1";
   } catch {
     return false;
@@ -61,25 +52,8 @@ export function markIntroSeen() {
   try {
     localStorage.setItem(LEGACY_KEY, "1");
   } catch {
-    // private mode — the super property below still holds for this session
+    // private mode
   }
-  if (!import.meta.env.DEV && started) {
-    posthog.register({ intro_seen: true });
-    posthog.capture("intro_completed");
-  }
-}
-
-export function trackIntroReplay() {
-  if (started) posthog.capture("intro_replayed");
-}
-
-type EventProperties = Record<
-  string,
-  string | number | boolean | null | undefined
->;
-
-export function trackEvent(event: string, properties?: EventProperties) {
-  if (started) posthog.capture(event, properties);
 }
 
 type ErrorContext = {
