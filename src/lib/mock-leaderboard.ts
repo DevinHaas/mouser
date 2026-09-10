@@ -11,7 +11,7 @@ const MOCK = [
   { name: 'yyx990803', timeMs: 95120, image: 'https://avatars.githubusercontent.com/u/499550?v=4' },
 ]
 
-export type Row = { name: string; timeMs: number; image: string | null }
+export type Row = { name: string; timeMs: number; image: string | null; mouselessTool?: string | null }
 
 /** Real rows first, mock rows filling the rest, re-sorted by time. Padded rows are flagged demo. */
 export function padTop3(rows: Row[]): PodiumEntry[] {

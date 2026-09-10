@@ -4,6 +4,7 @@ import { useMemo, useRef, Suspense } from "react";
 import * as THREE from "three";
 import { Booster } from "./booster";
 import { fmtTime } from "@/lib/format";
+import { MOUSELESS_TOOL_BY_ID } from "@/lib/mouseless-tools";
 
 const FLOATER = "/floater.glb";
 /** Same face as the .title-fx headings (see index.css @font-face "Ryzes"). */
@@ -16,6 +17,7 @@ export type PodiumEntry = {
   name: string;
   timeMs: number;
   image: string | null;
+  mouselessTool?: string | null;
   /** true = placeholder row shown only until the real board fills up */
   demo?: boolean;
 };
@@ -81,6 +83,8 @@ function AvatarFallback({ name, y, color }: { name: string; y: number; color: st
 
 function PodiumFloater({ entry }: { entry: PodiumEntry }) {
   const cfg = RANK[entry.rank];
+  const tool = entry.mouselessTool ? MOUSELESS_TOOL_BY_ID.get(entry.mouselessTool) : null;
+  const footer = tool?.name ?? entry.mouselessTool ?? (entry.demo ? "DEMO" : null);
   const group = useRef<THREE.Group>(null);
   const hull = useRef<THREE.Group>(null);
   const labels = useRef<THREE.Group>(null);
@@ -146,17 +150,17 @@ function PodiumFloater({ entry }: { entry: PodiumEntry }) {
       >
         {fmtTime(entry.timeMs)}
       </Text>
-      {entry.demo && (
+      {footer && (
         <Text
           position={[0, -2.4, 0]}
           font={BODY_FONT}
           fontSize={0.16}
-          color="#8a8fb0"
+          color={tool?.color ?? "#8a8fb0"}
           outlineWidth={0.01}
           outlineColor="#03040c"
           anchorX="center"
         >
-          DEMO
+          {footer}
         </Text>
       )}
       </group>
